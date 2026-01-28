@@ -1,0 +1,77 @@
+# SunHarvest Connect - Development Environment
+# Run with: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: sunharvest-db
+    environment:
+      POSTGRES_USER: ${DB_USER:-sunharvest}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
+      POSTGRES_DB: ${DB_NAME:-sunharvest_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sunharvest"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: sunharvest-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Backend API
+  backend:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    container_name: sunharvest-api
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://sunharvest:devpassword@postgres:5432/sunharvest_dev
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      AFRICAS_TALKING_API_KEY: ${AFRICAS_TALKING_API_KEY}
+      AFRICAS_TALKING_USERNAME: ${AFRICAS_TALKING_USERNAME}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ../../backend/src:/app/src
+    command: npm run dev
+
+  # ML Model Server
+  ml-server:
+    build:
+      context: ../../ml
+      dockerfile: Dockerfile
+    container_name: sunharvest-ml
+    environment:
+      MODEL_PATH: /models/quality_grading.tflite
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5000:5000"
+    volumes:
+      - ../../ml/models:/models:ro
+    command: gunicorn --bind 0.0.0.0:5000 server:app
+
+volumes:
+  postgres_data:
+  redis_data:
