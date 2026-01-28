@@ -1,0 +1,520 @@
+// SunHarvest Connect - Database Schema
+// Using Prisma ORM for type-safe database access
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+model User {
+  id          String   @id @default(uuid())
+  phone       String   @unique
+  pin         String   // Hashed PIN (not password - easier for farmers)
+  name        String
+  role        UserRole
+  language    Language @default(EN)
+  isVerified  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Location
+  county      String?
+  subCounty   String?
+  ward        String?
+  latitude    Float?
+  longitude   Float?
+
+  // Relations
+  listings      ProduceListing[] @relation("FarmerListings")
+  purchases     Transaction[]    @relation("BuyerTransactions")
+  gradingResults GradingResult[]
+  smsLogs       SmsLog[]
+
+  // For transporters
+  vehicleType     String?
+  vehicleCapacity Float?
+
+  // Ratings
+  rating          Float?
+  totalRatings    Int     @default(0)
+
+  @@index([phone])
+  @@index([role])
+  @@index([county])
+}
+
+enum UserRole {
+  FARMER
+  BUYER
+  TRANSPORTER
+  ADMIN
+}
+
+enum Language {
+  EN
+  SW
+}
+
+// ============================================
+// PRODUCE & LISTINGS
+// ============================================
+
+model ProduceListing {
+  id          String        @id @default(uuid())
+  farmerId    String
+  farmer      User          @relation("FarmerListings", fields: [farmerId], references: [id])
+
+  // Product details
+  cropType    CropType
+  variety     String?
+  quantity    Float
+  unit        Unit          @default(KG)
+
+  // Quality
+  qualityGrade  QualityGrade
+  gradingId     String?       @unique
+  grading       GradingResult? @relation(fields: [gradingId], references: [id])
+
+  // Pricing
+  priceAmount   Float
+  priceCurrency String        @default("KES")
+  priceUnit     Unit          @default(KG)
+  negotiable    Boolean       @default(true)
+
+  // Images
+  images        String[]      // URLs to stored images
+
+  // Location (can differ from farmer's location)
+  county        String
+  subCounty     String?
+
+  // Availability
+  harvestDate   DateTime?
+  availableUntil DateTime?
+
+  // Status
+  status        ListingStatus @default(PENDING)
+
+  // Timestamps
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  transactions  Transaction[]
+
+  @@index([farmerId])
+  @@index([cropType])
+  @@index([status])
+  @@index([county])
+  @@index([qualityGrade])
+  @@index([createdAt])
+}
+
+enum CropType {
+  TOMATOES
+  MANGOES
+  ONIONS
+  POTATOES
+  CABBAGE
+  KALE
+  SPINACH
+  AVOCADO
+  BANANAS
+  ORANGES
+  PEPPERS
+  CARROTS
+  OTHER
+}
+
+enum Unit {
+  KG
+  PIECE
+  BUNCH
+  CRATE
+  BAG
+}
+
+enum QualityGrade {
+  PREMIUM
+  GRADE_A
+  GRADE_B
+  REJECT
+}
+
+enum ListingStatus {
+  PENDING     // Awaiting grade or approval
+  ACTIVE      // Available for purchase
+  RESERVED    // Buyer interested, pending confirmation
+  SOLD        // Transaction completed
+  EXPIRED     // Past availability date
+  CANCELLED   // Farmer cancelled
+}
+
+// ============================================
+// AI QUALITY GRADING
+// ============================================
+
+model GradingResult {
+  id            String       @id @default(uuid())
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+
+  // Image reference
+  imageHash     String       // SHA256 hash for deduplication
+  imageUrl      String       // Stored image URL
+
+  // AI Result
+  cropType      CropType
+  grade         QualityGrade
+  confidence    Float        // 0.0 to 1.0
+  defects       Json?        // Array of detected defects
+
+  // Model info
+  modelVersion  String
+  inferenceTime Int          // Milliseconds
+
+  // Human review (for human-in-the-loop)
+  isDisputed    Boolean      @default(false)
+  reviewStatus  ReviewStatus @default(NOT_REVIEWED)
+  reviewedBy    String?      // Admin user ID
+  reviewedAt    DateTime?
+  reviewNotes   String?
+  originalGrade QualityGrade? // If overridden, store original
+
+  // Timestamps
+  createdAt     DateTime     @default(now())
+
+  // Relations
+  listing       ProduceListing?
+
+  @@index([userId])
+  @@index([isDisputed])
+  @@index([reviewStatus])
+}
+
+enum ReviewStatus {
+  NOT_REVIEWED
+  PENDING_REVIEW
+  APPROVED
+  OVERRIDDEN
+}
+
+// ============================================
+// TRANSACTIONS
+// ============================================
+
+model Transaction {
+  id            String            @id @default(uuid())
+
+  // Parties
+  listingId     String
+  listing       ProduceListing    @relation(fields: [listingId], references: [id])
+  buyerId       String
+  buyer         User              @relation("BuyerTransactions", fields: [buyerId], references: [id])
+
+  // Deal details
+  quantity      Float
+  unit          Unit
+  agreedPrice   Float
+  currency      String            @default("KES")
+
+  // Status
+  status        TransactionStatus @default(PENDING)
+
+  // Payment
+  paymentMethod PaymentMethod?
+  paymentRef    String?           // M-Pesa confirmation code, etc.
+  paidAt        DateTime?
+
+  // Delivery
+  transporterId String?
+  pickupDate    DateTime?
+  deliveredAt   DateTime?
+
+  // Timestamps
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  completedAt   DateTime?
+
+  @@index([listingId])
+  @@index([buyerId])
+  @@index([status])
+}
+
+enum TransactionStatus {
+  PENDING           // Offer made
+  ACCEPTED          // Farmer accepted
+  PAYMENT_PENDING   // Awaiting payment
+  PAID              // Payment received
+  IN_TRANSIT        // Being delivered
+  DELIVERED         // Buyer received
+  COMPLETED         // Both parties confirmed
+  DISPUTED          // Issue raised
+  CANCELLED         // Either party cancelled
+}
+
+enum PaymentMethod {
+  MPESA
+  CASH
+  BANK_TRANSFER
+}
+
+// ============================================
+// MARKET PRICES
+// ============================================
+
+model MarketPrice {
+  id          String    @id @default(uuid())
+  cropType    CropType
+  market      String    // e.g., "Nairobi Wakulima", "Mombasa Kongowea"
+  marketType  MarketType
+
+  // Prices
+  wholesale   Float
+  retail      Float
+  unit        Unit      @default(KG)
+  currency    String    @default("KES")
+
+  // Trend
+  previousPrice Float?
+  trend         PriceTrend?
+
+  // Date (one entry per crop per market per day)
+  date        DateTime  @default(now()) @db.Date
+
+  // Metadata
+  source      String?   // Where the data came from
+  createdAt   DateTime  @default(now())
+
+  @@unique([cropType, market, date])
+  @@index([cropType])
+  @@index([date])
+}
+
+enum MarketType {
+  WHOLESALE
+  RETAIL
+  FARMGATE
+}
+
+enum PriceTrend {
+  RISING
+  STABLE
+  FALLING
+}
+
+// ============================================
+// SMS COMMUNICATION
+// ============================================
+
+model SmsLog {
+  id          String      @id @default(uuid())
+
+  // User (if known)
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id])
+  phone       String      // Always store phone, even if user unknown
+
+  // Message
+  direction   SmsDirection
+  message     String
+
+  // Parsed intent
+  intent      String?     // e.g., "CHECK_PRICE", "LIST_PRODUCE"
+  entities    Json?       // Extracted entities
+
+  // Africa's Talking metadata
+  atMessageId String?     @unique
+  status      SmsStatus   @default(PENDING)
+
+  // Timestamps
+  createdAt   DateTime    @default(now())
+  deliveredAt DateTime?
+
+  @@index([phone])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+enum SmsDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum SmsStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+// ============================================
+// AI MARKET INTELLIGENCE
+// ============================================
+
+// Historical price data for ML training
+model PriceHistory {
+  id          String    @id @default(uuid())
+  cropType    CropType
+  market      String    // Market name
+  county      String    // County for regional analysis
+
+  // Price data
+  price       Float     // Price per unit
+  unit        Unit      @default(KG)
+  currency    String    @default("KES")
+
+  // Volume/supply indicator
+  volume      Float?    // Estimated volume traded
+  supplyLevel SupplyLevel?
+
+  // Date
+  date        DateTime  @db.Date
+
+  // Data source
+  source      DataSource
+  sourceRef   String?   // External reference ID
+
+  createdAt   DateTime  @default(now())
+
+  @@unique([cropType, market, date])
+  @@index([cropType])
+  @@index([date])
+  @@index([county])
+}
+
+enum SupplyLevel {
+  LOW
+  NORMAL
+  HIGH
+  SURPLUS
+}
+
+enum DataSource {
+  FAO
+  GOVERNMENT
+  PLATFORM
+  SYNTHETIC
+}
+
+// Weather data for price correlation
+model WeatherData {
+  id          String    @id @default(uuid())
+  county      String    // Kenya county
+
+  // Weather metrics
+  temperature Float     // Celsius
+  rainfall    Float     // mm
+  humidity    Float?    // percentage
+
+  // Date
+  date        DateTime  @db.Date
+
+  // Metadata
+  source      String    @default("open-meteo")
+  createdAt   DateTime  @default(now())
+
+  @@unique([county, date])
+  @@index([county])
+  @@index([date])
+}
+
+// Cached AI predictions
+model PricePrediction {
+  id          String    @id @default(uuid())
+
+  // Input parameters
+  cropType    CropType
+  grade       QualityGrade
+  county      String
+  quantity    Float
+
+  // Prediction results
+  predictedPrice    Float
+  priceRangeMin     Float
+  priceRangeMax     Float
+  confidence        Float     // 0.0 to 1.0
+
+  // Market context
+  marketAverage     Float
+  trend             PriceTrend
+  reasoning         String?
+
+  // Validity
+  validUntil        DateTime  // Predictions expire
+
+  // Metadata
+  modelVersion      String
+  createdAt         DateTime  @default(now())
+
+  @@index([cropType, county])
+  @@index([createdAt])
+}
+
+// Track listing sale performance (for success prediction training)
+model ListingSaleData {
+  id          String    @id @default(uuid())
+
+  // Listing details at time of creation
+  cropType    CropType
+  grade       QualityGrade
+  county      String
+  quantity    Float
+  askingPrice Float
+
+  // Market context at listing time
+  marketPrice Float     // Average market price when listed
+  priceRatio  Float     // askingPrice / marketPrice
+
+  // Outcome
+  sold        Boolean
+  daysToSell  Int?      // NULL if not sold
+  finalPrice  Float?    // Actual sale price
+
+  // Dates
+  listedAt    DateTime
+  soldAt      DateTime?
+
+  createdAt   DateTime  @default(now())
+
+  @@index([cropType])
+  @@index([sold])
+  @@index([daysToSell])
+}
+
+// ============================================
+// AUDIT LOG (for compliance)
+// ============================================
+
+model AuditLog {
+  id          String    @id @default(uuid())
+
+  // Who
+  userId      String?
+  userPhone   String?
+  ipAddress   String?
+
+  // What
+  action      String    // e.g., "LOGIN", "GRADE_PRODUCE", "CREATE_LISTING"
+  resource    String    // e.g., "User", "ProduceListing"
+  resourceId  String?
+
+  // Details
+  details     Json?     // Any additional context
+
+  // When
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
