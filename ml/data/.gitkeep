@@ -1,0 +1,18 @@
+# This directory contains training data
+#
+# Structure:
+# data/
+# ├── quality_grading/
+# │   ├── train/
+# │   │   ├── premium/
+# │   │   ├── grade_a/
+# │   │   ├── grade_b/
+# │   │   └── reject/
+# │   ├── test/
+# │   └── metadata.csv
+# └── prices/
+#     └── historical_prices.csv
+#
+# NOTE: Raw data should NOT be committed to git.
+# Use .gitignore to exclude data files.
+# Only commit this .gitkeep file.

@@ -1,0 +1,49 @@
+# SunHarvest Connect - ML Dependencies
+
+# Core ML Frameworks
+tensorflow==2.15.0
+torch==2.1.0
+scikit-learn==1.3.2
+
+# Computer Vision
+opencv-python==4.8.1.78
+Pillow==10.1.0
+
+# Data Processing
+numpy==1.26.2
+pandas==2.1.3
+scipy==1.11.4
+
+# NLP
+transformers==4.35.2
+sentencepiece==0.1.99
+
+# Time Series
+prophet==1.1.5
+statsmodels==0.14.0
+
+# Visualization
+matplotlib==3.8.2
+seaborn==0.13.0
+
+# Model Serving
+flask==3.0.0
+gunicorn==21.2.0
+
+# Experiment Tracking
+mlflow==2.9.1
+tensorboard==2.15.1
+
+# Utilities
+python-dotenv==1.0.0
+tqdm==4.66.1
+pyyaml==6.0.1
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+
+# Code Quality
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
