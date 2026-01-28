@@ -1,0 +1,77 @@
+# SunHarvest Connect - Git Ignore
+
+# ===== Dependencies =====
+node_modules/
+.pnp/
+.pnp.js
+
+# ===== Build Output =====
+dist/
+build/
+*.tsbuildinfo
+
+# ===== Environment Files =====
+.env
+.env.local
+.env.*.local
+.env.production
+*.env
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ===== Logs =====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== Testing =====
+coverage/
+.nyc_output/
+*.lcov
+
+# ===== ML / Data =====
+ml/data/*
+!ml/data/.gitkeep
+ml/models/*.h5
+ml/models/*.tflite
+ml/models/*.pkl
+*.weights
+checkpoints/
+mlruns/
+
+# ===== Mobile =====
+mobile/.expo/
+mobile/ios/Pods/
+*.ipa
+*.apk
+*.aab
+
+# ===== Secrets (NEVER COMMIT) =====
+*.pem
+*.key
+credentials.json
+service-account.json
+secrets/
+
+# ===== Temporary =====
+tmp/
+temp/
+*.tmp
+
+# ===== Cache =====
+.cache/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# ===== Docker =====
+docker-compose.override.yml
+
