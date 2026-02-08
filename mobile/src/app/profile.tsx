@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,17 @@ import {
   Alert,
   Modal,
   Switch,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import TrustScoreBadge from '../components/TrustScoreBadge';
+import {
+  getUserStats, getUserTransactions,
+  UserStats, UserTransaction, PaginatedResponse,
+} from '../services/api';
 
 interface Transaction {
   id: string;
@@ -33,6 +38,63 @@ export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [smsAlertsEnabled, setSmsAlertsEnabled] = useState(true);
 
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [txPage, setTxPage] = useState(1);
+  const [txTotalPages, setTxTotalPages] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Convert API transactions to the local Transaction shape
+  const mapTx = (tx: UserTransaction): Transaction => {
+    const crop = typeof tx.crop === 'string'
+      ? tx.crop.charAt(0) + tx.crop.slice(1).toLowerCase()
+      : tx.crop;
+    const isSale = user?.userType === 'farmer';
+    return {
+      id: tx.id,
+      type: isSale ? 'sale' : 'purchase',
+      description: `${isSale ? 'Sold' : 'Bought'} ${tx.quantity}${tx.unit} ${crop}`,
+      amount: isSale ? tx.agreedPrice : -tx.agreedPrice,
+      date: new Date(tx.createdAt).toISOString().split('T')[0],
+      status: ['COMPLETED', 'DELIVERED'].includes(tx.status) ? 'completed' : 'pending',
+    };
+  };
+
+  const loadProfileData = useCallback(async () => {
+    if (!user?.id) return;
+
+    const [statsResult, txResult] = await Promise.all([
+      getUserStats(user.id).catch(() => null),
+      getUserTransactions(user.id, { page: 1, limit: 20 }).catch(() => null),
+    ]);
+
+    if (statsResult) setUserStats(statsResult);
+    if (txResult) {
+      setTransactions(txResult.data.map(mapTx));
+      setTxTotalPages(txResult.pagination.totalPages);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadProfileData();
+  }, [loadProfileData]);
+
+  const onProfileRefresh = async () => {
+    setRefreshing(true);
+    await loadProfileData();
+    setRefreshing(false);
+  };
+
+  const loadMoreTransactions = async () => {
+    if (!user?.id || txPage >= txTotalPages) return;
+    const nextPage = txPage + 1;
+    const result = await getUserTransactions(user.id, { page: nextPage, limit: 20 }).catch(() => null);
+    if (result) {
+      setTransactions(prev => [...prev, ...result.data.map(mapTx)]);
+      setTxPage(nextPage);
+    }
+  };
+
   interface StatItem {
     value: string | number;
     label: string;
@@ -44,9 +106,9 @@ export default function ProfileScreen() {
     stat3: StatItem;
   }
 
-  // Mock stats based on user type
   const getStats = (): StatsData => {
-    if (!user) return {
+    const s = userStats;
+    if (!user || !s) return {
       stat1: { value: 0, label: 'Activity' },
       stat2: { value: 0, label: 'Transactions' },
       stat3: { value: '-', label: 'Rating' },
@@ -55,21 +117,24 @@ export default function ProfileScreen() {
     switch (user.userType) {
       case 'farmer':
         return {
-          stat1: { value: 23, label: 'Listings' },
-          stat2: { value: 156, label: 'Sales' },
-          stat3: { value: 4.8, label: 'Rating' },
+          stat1: { value: s.totalListings || 0, label: 'Listings' },
+          stat2: { value: s.totalSold || 0, label: 'Sales' },
+          stat3: { value: s.rating?.toFixed(1) || '-', label: 'Rating' },
         };
-      case 'buyer':
+      case 'buyer': {
+        const spent = s.totalSpent || 0;
+        const spentStr = spent >= 1000 ? `KSh ${Math.round(spent / 1000)}K` : `KSh ${spent}`;
         return {
-          stat1: { value: 89, label: 'Orders' },
-          stat2: { value: 'KSh 450K', label: 'Spent' },
-          stat3: { value: 4.9, label: 'Rating' },
+          stat1: { value: s.totalPurchases || 0, label: 'Orders' },
+          stat2: { value: spentStr, label: 'Spent' },
+          stat3: { value: s.rating?.toFixed(1) || '-', label: 'Rating' },
         };
+      }
       case 'transporter':
         return {
-          stat1: { value: 234, label: 'Deliveries' },
-          stat2: { value: 'KSh 180K', label: 'Earned' },
-          stat3: { value: 4.7, label: 'Rating' },
+          stat1: { value: s.totalDeliveries || 0, label: 'Deliveries' },
+          stat2: { value: s.activeJobs || 0, label: 'Active' },
+          stat3: { value: s.rating?.toFixed(1) || '-', label: 'Rating' },
         };
       default:
         return {
@@ -79,14 +144,6 @@ export default function ProfileScreen() {
         };
     }
   };
-
-  const MOCK_TRANSACTIONS: Transaction[] = [
-    { id: '1', type: 'sale', description: 'Sold 500kg Tomatoes', amount: 50000, date: '2024-01-14', status: 'completed' },
-    { id: '2', type: 'savings', description: 'SACCO Deposit', amount: -5000, date: '2024-01-13', status: 'completed' },
-    { id: '3', type: 'sale', description: 'Sold 200kg Onions', amount: 12000, date: '2024-01-12', status: 'completed' },
-    { id: '4', type: 'loan', description: 'Loan Repayment', amount: -3500, date: '2024-01-10', status: 'completed' },
-    { id: '5', type: 'sale', description: 'Sold 1000kg Potatoes', amount: 80000, date: '2024-01-08', status: 'pending' },
-  ];
 
   const stats = getStats();
 
@@ -123,10 +180,14 @@ export default function ProfileScreen() {
     return null;
   }
 
-  const isVerified = true; // Mock verification status
+  const isVerified = (userStats?.totalRatings || 0) > 0; // Based on activity
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onProfileRefresh} colors={['#2E7D32']} />}
+    >
       <View style={styles.content}>
         {/* Profile Header */}
         <View style={styles.header}>
@@ -242,7 +303,7 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
           <View style={styles.transactionsCard}>
-            {MOCK_TRANSACTIONS.slice(0, 3).map((tx, index) => (
+            {transactions.slice(0, 3).map((tx, index) => (
               <View key={tx.id}>
                 <View style={styles.transactionRow}>
                   <View style={[
@@ -414,45 +475,60 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
           <ScrollView style={styles.modalContent}>
-            {MOCK_TRANSACTIONS.map((tx) => (
-              <View key={tx.id} style={styles.txCard}>
-                <View style={[
-                  styles.txIconLarge,
-                  { backgroundColor: tx.amount > 0 ? '#E8F5E9' : '#FFF3E0' }
-                ]}>
-                  <Ionicons
-                    name={
-                      tx.type === 'sale' ? 'cash' :
-                      tx.type === 'savings' ? 'wallet' :
-                      tx.type === 'loan' ? 'card' : 'swap-horizontal'
-                    }
-                    size={24}
-                    color={tx.amount > 0 ? '#2E7D32' : '#F57C00'}
-                  />
-                </View>
-                <View style={styles.txCardContent}>
-                  <Text style={styles.txCardDescription}>{tx.description}</Text>
-                  <Text style={styles.txCardDate}>{tx.date}</Text>
-                  <View style={[
-                    styles.txStatusBadge,
-                    { backgroundColor: tx.status === 'completed' ? '#E8F5E9' : '#FFF3E0' }
-                  ]}>
-                    <Text style={[
-                      styles.txStatusText,
-                      { color: tx.status === 'completed' ? '#2E7D32' : '#F57C00' }
-                    ]}>
-                      {tx.status}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={[
-                  styles.txCardAmount,
-                  { color: tx.amount > 0 ? '#2E7D32' : '#F57C00' }
-                ]}>
-                  {tx.amount > 0 ? '+' : ''}KSh {Math.abs(tx.amount).toLocaleString()}
-                </Text>
+            {transactions.length === 0 ? (
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                <Ionicons name="receipt-outline" size={48} color="#ccc" />
+                <Text style={{ color: '#999', marginTop: 12 }}>No transactions yet</Text>
               </View>
-            ))}
+            ) : (
+              transactions.map((tx) => (
+                <View key={tx.id} style={styles.txCard}>
+                  <View style={[
+                    styles.txIconLarge,
+                    { backgroundColor: tx.amount > 0 ? '#E8F5E9' : '#FFF3E0' }
+                  ]}>
+                    <Ionicons
+                      name={
+                        tx.type === 'sale' ? 'cash' :
+                        tx.type === 'savings' ? 'wallet' :
+                        tx.type === 'loan' ? 'card' : 'swap-horizontal'
+                      }
+                      size={24}
+                      color={tx.amount > 0 ? '#2E7D32' : '#F57C00'}
+                    />
+                  </View>
+                  <View style={styles.txCardContent}>
+                    <Text style={styles.txCardDescription}>{tx.description}</Text>
+                    <Text style={styles.txCardDate}>{tx.date}</Text>
+                    <View style={[
+                      styles.txStatusBadge,
+                      { backgroundColor: tx.status === 'completed' ? '#E8F5E9' : '#FFF3E0' }
+                    ]}>
+                      <Text style={[
+                        styles.txStatusText,
+                        { color: tx.status === 'completed' ? '#2E7D32' : '#F57C00' }
+                      ]}>
+                        {tx.status}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[
+                    styles.txCardAmount,
+                    { color: tx.amount > 0 ? '#2E7D32' : '#F57C00' }
+                  ]}>
+                    {tx.amount > 0 ? '+' : ''}KSh {Math.abs(tx.amount).toLocaleString()}
+                  </Text>
+                </View>
+              ))
+            )}
+            {txPage < txTotalPages && (
+              <TouchableOpacity
+                style={{ paddingVertical: 16, alignItems: 'center' }}
+                onPress={loadMoreTransactions}
+              >
+                <Text style={{ color: '#2E7D32', fontWeight: '600' }}>Load More</Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </View>
       </Modal>

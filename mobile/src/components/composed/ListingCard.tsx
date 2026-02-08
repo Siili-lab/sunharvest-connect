@@ -55,7 +55,7 @@ export function ListingCard({
   listing,
   onPress,
   variant = 'full',
-}: ListingCardProps): JSX.Element {
+}: ListingCardProps): React.JSX.Element {
   const { t } = useTranslation();
 
   // Format price

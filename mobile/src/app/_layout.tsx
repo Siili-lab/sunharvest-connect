@@ -141,9 +141,21 @@ function MainLayout() {
         }}
       />
 
+      {/* Grade - Farmers only */}
+      <Tabs.Screen
+        name="grade"
+        options={{
+          title: 'Grade',
+          tabBarLabel: 'Grade',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="camera" size={size} color={color} />
+          ),
+          href: isFarmer ? '/grade' : null,
+        }}
+      />
+
       {/* Hidden screens */}
       <Tabs.Screen name="auth" options={{ href: null }} />
-      <Tabs.Screen name="grade" options={{ href: null }} />
     </Tabs>
   );
 }

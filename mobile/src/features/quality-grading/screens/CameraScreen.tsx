@@ -6,15 +6,12 @@
  */
 
 import React, { useState, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text } from 'react-native';
-import { Camera } from 'expo-camera';
+import { View, StyleSheet } from 'react-native';
+import { CameraView } from 'expo-camera';
 import { useQualityGrading } from '../hooks/useQualityGrading';
-import { GradeResult } from '../components/GradeResult';
-import { CaptureButton } from '../components/CaptureButton';
-import { strings } from '../../../i18n';
 
 export const CameraScreen: React.FC = () => {
-  const cameraRef = useRef<Camera>(null);
+  const cameraRef = useRef<CameraView>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const { grade, isGrading, gradeImage } = useQualityGrading();
 

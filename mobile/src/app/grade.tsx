@@ -29,12 +29,90 @@ const CROP_TYPES = [
   { id: 'maize', name: 'Maize', emoji: '' },
 ];
 
+// ── Crop-aware offline mock (mirrors backend mockGradingModel) ──────────
+
+const CROP_DEFECTS: Record<string, string[]> = {
+  tomato: ['cracking', 'sunscald', 'blossom end rot', 'catfacing'],
+  potato: ['greening', 'scab', 'growth cracks', 'hollow heart'],
+  onion: ['neck rot', 'black mold', 'splitting', 'sunburn'],
+  carrot: ['forking', 'cracking', 'green shoulder', 'cavity spot'],
+  mango: ['anthracnose', 'latex burn', 'stem-end rot', 'lenticel spotting'],
+  cabbage: ['black rot', 'tip burn', 'insect damage', 'splitting'],
+  spinach: ['leaf miner trails', 'downy mildew', 'yellowing', 'bolting damage'],
+  maize: ['ear rot', 'kernel damage', 'insect boring', 'husk discoloration'],
+};
+
+const OFFLINE_BASE_PRICES: Record<string, number> = {
+  tomato: 100, potato: 75, onion: 90, carrot: 75,
+  mango: 120, cabbage: 45, spinach: 55, maize: 45,
+};
+
+const GRADE_MULT: Record<string, number> = {
+  Premium: 1.25, 'Grade A': 1.0, 'Grade B': 0.8, Reject: 0.5,
+};
+
+function offlineGrade(cropId: string): GradeResult & { priceRangeMin?: number; priceRangeMax?: number; trend?: string; demandLevel?: string } {
+  // Weighted distribution: ~25% Premium, ~60% Grade A, ~12% Grade B, ~3% Reject
+  const roll = Math.random();
+  const grade: GradeResult['grade'] =
+    roll < 0.25 ? 'Premium' :
+    roll < 0.85 ? 'Grade A' :
+    roll < 0.97 ? 'Grade B' : 'Reject';
+
+  const confidence = grade === 'Premium' || grade === 'Reject'
+    ? 0.88 + Math.random() * 0.10
+    : 0.75 + Math.random() * 0.15;
+
+  const pool = CROP_DEFECTS[cropId] || ['minor surface blemishes'];
+  const defectCount = grade === 'Premium' ? 0 : grade === 'Grade A' ? 1 : grade === 'Grade B' ? 2 : 3;
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const defects = shuffled.slice(0, defectCount);
+
+  const base = OFFLINE_BASE_PRICES[cropId] || 100;
+  const mult = GRADE_MULT[grade];
+  const suggestedPrice = Math.round(base * mult);
+  const priceRangeMin = Math.round(base * 0.8 * mult);
+  const priceRangeMax = Math.round(base * 1.3 * mult);
+
+  return {
+    grade,
+    confidence: Math.round(confidence * 100) / 100,
+    suggestedPrice,
+    priceRangeMin,
+    priceRangeMax,
+    currency: 'KSh',
+    unit: 'kg',
+    cropType: CROP_TYPES.find((c) => c.id === cropId)?.name || cropId,
+    defects,
+    gradedAt: new Date().toISOString(),
+    trend: 'stable',
+    demandLevel: 'normal',
+  };
+}
+
+// ── Trend indicator helper ──────────────────────────────────────────────
+
+const TREND_CONFIG: Record<string, { arrow: string; label: string; color: string }> = {
+  rising:  { arrow: '^', label: 'Rising',  color: '#2E7D32' },
+  stable:  { arrow: '-', label: 'Stable',  color: '#F57C00' },
+  falling: { arrow: 'v', label: 'Falling', color: '#C62828' },
+};
+
+// ── Extended result type used locally ───────────────────────────────────
+
+type ExtendedResult = GradeResult & {
+  priceRangeMin?: number;
+  priceRangeMax?: number;
+  trend?: string;
+  demandLevel?: string;
+};
+
 export default function GradeScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [image, setImage] = useState<string | null>(null);
   const [isGrading, setIsGrading] = useState(false);
-  const [result, setResult] = useState<GradeResult | null>(null);
+  const [result, setResult] = useState<ExtendedResult | null>(null);
   const [showListingModal, setShowListingModal] = useState(false);
   const [isListing, setIsListing] = useState(false);
   const [selectedCrop, setSelectedCrop] = useState('tomato');
@@ -97,28 +175,11 @@ export default function GradeScreen() {
 
     try {
       const gradeResult = await gradeImage(image, selectedCrop);
-      setResult(gradeResult);
+      // The backend now returns priceRangeMin, priceRangeMax, trend, demandLevel
+      setResult(gradeResult as ExtendedResult);
     } catch (error) {
-      console.log('Grading error:', error);
-      const grades = ['Premium', 'Grade A', 'Grade B'] as const;
-      const randomGrade = grades[Math.floor(Math.random() * grades.length)];
-      const basePrices: Record<string, number> = {
-        tomato: 100, potato: 80, onion: 90, carrot: 85,
-        mango: 150, cabbage: 60, spinach: 70, maize: 50,
-      };
-      const gradeMultiplier = { Premium: 1.2, 'Grade A': 1.0, 'Grade B': 0.7, Reject: 0.3 };
-      const basePrice = basePrices[selectedCrop] || 100;
-
-      setResult({
-        grade: randomGrade,
-        confidence: 0.75 + Math.random() * 0.2,
-        suggestedPrice: Math.round(basePrice * gradeMultiplier[randomGrade]),
-        currency: 'KSh',
-        unit: 'kg',
-        cropType: getCropName(selectedCrop),
-        defects: randomGrade === 'Premium' ? [] : ['Minor blemishes'],
-        gradedAt: new Date().toISOString(),
-      });
+      console.log('Grading error (using offline mock):', error);
+      setResult(offlineGrade(selectedCrop));
     }
 
     setIsGrading(false);
@@ -185,6 +246,8 @@ export default function GradeScreen() {
     Reject: '#FFEBEE',
   };
 
+  const trendInfo = result?.trend ? TREND_CONFIG[result.trend] || TREND_CONFIG.stable : null;
+
   return (
     <View style={styles.container}>
       {!image ? (
@@ -205,7 +268,7 @@ export default function GradeScreen() {
           </View>
         </View>
       ) : (
-        <View style={styles.resultSection}>
+        <ScrollView style={styles.resultSection} showsVerticalScrollIndicator={false}>
           <Image source={{ uri: image }} style={styles.preview} />
 
           {!result && !isGrading && (
@@ -249,6 +312,27 @@ export default function GradeScreen() {
                 </Text>
               </View>
 
+              {/* Price range */}
+              {result.priceRangeMin != null && result.priceRangeMax != null && (
+                <View style={styles.priceRangeRow}>
+                  <Text style={styles.priceRangeLabel}>Price Range</Text>
+                  <Text style={styles.priceRangeValue}>
+                    {result.currency} {result.priceRangeMin} – {result.priceRangeMax}/{result.unit}
+                  </Text>
+                </View>
+              )}
+
+              {/* Market trend */}
+              {trendInfo && (
+                <View style={styles.trendRow}>
+                  <Text style={styles.trendLabel}>Market Trend</Text>
+                  <View style={[styles.trendBadge, { backgroundColor: trendInfo.color + '18' }]}>
+                    <Text style={[styles.trendArrow, { color: trendInfo.color }]}>{trendInfo.arrow}</Text>
+                    <Text style={[styles.trendText, { color: trendInfo.color }]}>{trendInfo.label}</Text>
+                  </View>
+                </View>
+              )}
+
               {result.defects.length > 0 && (
                 <View style={styles.defectsSection}>
                   <Text style={styles.defectsLabel}>Notes</Text>
@@ -279,7 +363,7 @@ export default function GradeScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       )}
 
       <Modal
@@ -549,6 +633,47 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1B5E20',
   },
+  priceRangeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  priceRangeLabel: {
+    fontSize: 13,
+    color: '#666',
+  },
+  priceRangeValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#555',
+  },
+  trendRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  trendLabel: {
+    fontSize: 13,
+    color: '#666',
+  },
+  trendBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  trendArrow: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  trendText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   defectsSection: {
     marginTop: 16,
     paddingTop: 16,
@@ -567,6 +692,7 @@ const styles = StyleSheet.create({
   actions: {
     marginTop: 20,
     gap: 12,
+    paddingBottom: 20,
   },
   gradeButton: {
     backgroundColor: '#2E7D32',

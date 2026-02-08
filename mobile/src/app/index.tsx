@@ -4,36 +4,23 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import { getMarketPrices, getMarketIntelligence, MarketPrice, MarketIntelligence } from '../services/api';
+import {
+  getMarketPrices, getMarketIntelligence, getUserStats,
+  MarketPrice, MarketIntelligence, UserStats,
+} from '../services/api';
 
-// Mock data for dashboard stats
-const MOCK_FARMER_STATS = {
-  revenue: 125000,
-  revenueChange: 15.7,
-  activeListings: 8,
-  listingViews: 234,
-  pendingOffers: 5,
-  rating: 4.8,
-  totalSales: 34,
+// Fallback stats when API is unavailable
+const FALLBACK_FARMER_STATS: UserStats = {
+  role: 'FARMER', name: '', rating: null, totalRatings: 0,
+  totalListings: 0, activeListings: 0, totalSold: 0, totalRevenue: 0,
 };
-
-const MOCK_BUYER_STATS = {
-  totalSpent: 89000,
-  spentChange: 8.2,
-  activeOrders: 3,
-  completedOrders: 12,
-  savedSuppliers: 7,
-  rating: 4.9,
+const FALLBACK_BUYER_STATS: UserStats = {
+  role: 'BUYER', name: '', rating: null, totalRatings: 0,
+  totalPurchases: 0, totalSpent: 0, activeOffers: 0,
 };
-
-const MOCK_TRANSPORTER_STATS = {
-  earnings: 45000,
-  earningsChange: 12.3,
-  completedDeliveries: 28,
-  activeDeliveries: 2,
-  availableJobs: 15,
-  rating: 4.7,
-  onTimeRate: 96,
+const FALLBACK_TRANSPORTER_STATS: UserStats = {
+  role: 'TRANSPORTER', name: '', rating: null, totalRatings: 0,
+  totalDeliveries: 0, activeJobs: 0,
 };
 
 const AI_INSIGHTS = {
@@ -57,6 +44,7 @@ export default function DashboardScreen() {
   const { t } = useLanguage();
   const [prices, setPrices] = useState<MarketPrice[]>([]);
   const [intelligence, setIntelligence] = useState<MarketIntelligence | null>(null);
+  const [stats, setStats] = useState<UserStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const isFarmer = user?.userType === 'farmer';
@@ -166,13 +154,20 @@ export default function DashboardScreen() {
   }, []);
 
   const loadData = async () => {
+    // Fetch stats and market data in parallel
+    const statsPromise = user?.id
+      ? getUserStats(user.id).catch(() => null)
+      : Promise.resolve(null);
+
     try {
-      const [pricesData, intelligenceData] = await Promise.all([
+      const [pricesData, intelligenceData, userStats] = await Promise.all([
         getMarketPrices(),
         getMarketIntelligence(user?.location),
+        statsPromise,
       ]);
       setPrices(pricesData.slice(0, 4));
       setIntelligence(intelligenceData);
+      if (userStats) setStats(userStats);
     } catch {
       setPrices([
         { crop: 'tomato', wholesale: 100, retail: 150, unit: 'kg', currency: 'KSh' },
@@ -234,95 +229,104 @@ export default function DashboardScreen() {
 
       {/* Stats Cards */}
       <View style={styles.statsContainer}>
-        {isFarmer && (
-          <>
-            <View style={styles.statCardPrimary}>
-              <Text style={styles.statLabel}>Total Revenue</Text>
-              <Text style={styles.statValueLarge}>KSh {MOCK_FARMER_STATS.revenue.toLocaleString()}</Text>
-              <View style={styles.statChange}>
-                <Ionicons name="trending-up" size={14} color="#4CAF50" />
-                <Text style={styles.statChangeText}>+{MOCK_FARMER_STATS.revenueChange}% this month</Text>
+        {isFarmer && (() => {
+          const s = stats || FALLBACK_FARMER_STATS;
+          return (
+            <>
+              <View style={styles.statCardPrimary}>
+                <Text style={styles.statLabel}>Total Revenue</Text>
+                <Text style={styles.statValueLarge}>KSh {(s.totalRevenue || 0).toLocaleString()}</Text>
+                <View style={styles.statChange}>
+                  <Ionicons name="leaf" size={14} color="#A5D6A7" />
+                  <Text style={styles.statChangeText}>{s.totalSold || 0} sold</Text>
+                </View>
               </View>
-            </View>
-            <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_FARMER_STATS.activeListings}</Text>
-                <Text style={styles.statLabel}>Listings</Text>
-                <Text style={styles.statSub}>{MOCK_FARMER_STATS.listingViews} views</Text>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.activeListings || 0}</Text>
+                  <Text style={styles.statLabel}>Listings</Text>
+                  <Text style={styles.statSub}>{s.totalListings || 0} total</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.totalSold || 0}</Text>
+                  <Text style={styles.statLabel}>Sold</Text>
+                  <Text style={styles.statSubHighlight}>completed</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.rating?.toFixed(1) || '-'}</Text>
+                  <Text style={styles.statLabel}>Rating</Text>
+                  <Text style={styles.statSub}>{s.totalRatings} reviews</Text>
+                </View>
               </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_FARMER_STATS.pendingOffers}</Text>
-                <Text style={styles.statLabel}>Offers</Text>
-                <Text style={styles.statSubHighlight}>pending</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_FARMER_STATS.rating}</Text>
-                <Text style={styles.statLabel}>Rating</Text>
-                <Text style={styles.statSub}>{MOCK_FARMER_STATS.totalSales} sales</Text>
-              </View>
-            </View>
-          </>
-        )}
+            </>
+          );
+        })()}
 
-        {isBuyer && (
-          <>
-            <View style={styles.statCardPrimary}>
-              <Text style={styles.statLabel}>Total Spent</Text>
-              <Text style={styles.statValueLarge}>KSh {MOCK_BUYER_STATS.totalSpent.toLocaleString()}</Text>
-              <View style={styles.statChange}>
-                <Ionicons name="trending-up" size={14} color="#4CAF50" />
-                <Text style={styles.statChangeText}>+{MOCK_BUYER_STATS.spentChange}% this month</Text>
+        {isBuyer && (() => {
+          const s = stats || FALLBACK_BUYER_STATS;
+          return (
+            <>
+              <View style={styles.statCardPrimary}>
+                <Text style={styles.statLabel}>Total Spent</Text>
+                <Text style={styles.statValueLarge}>KSh {(s.totalSpent || 0).toLocaleString()}</Text>
+                <View style={styles.statChange}>
+                  <Ionicons name="cart" size={14} color="#A5D6A7" />
+                  <Text style={styles.statChangeText}>{s.totalPurchases || 0} purchases</Text>
+                </View>
               </View>
-            </View>
-            <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_BUYER_STATS.activeOrders}</Text>
-                <Text style={styles.statLabel}>Active</Text>
-                <Text style={styles.statSubHighlight}>orders</Text>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.activeOffers || 0}</Text>
+                  <Text style={styles.statLabel}>Active</Text>
+                  <Text style={styles.statSubHighlight}>offers</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.totalPurchases || 0}</Text>
+                  <Text style={styles.statLabel}>Completed</Text>
+                  <Text style={styles.statSub}>orders</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.rating?.toFixed(1) || '-'}</Text>
+                  <Text style={styles.statLabel}>Rating</Text>
+                  <Text style={styles.statSub}>{s.totalRatings} reviews</Text>
+                </View>
               </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_BUYER_STATS.completedOrders}</Text>
-                <Text style={styles.statLabel}>Completed</Text>
-                <Text style={styles.statSub}>orders</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_BUYER_STATS.savedSuppliers}</Text>
-                <Text style={styles.statLabel}>Suppliers</Text>
-                <Text style={styles.statSub}>saved</Text>
-              </View>
-            </View>
-          </>
-        )}
+            </>
+          );
+        })()}
 
-        {isTransporter && (
-          <>
-            <View style={styles.statCardPrimary}>
-              <Text style={styles.statLabel}>Total Earnings</Text>
-              <Text style={styles.statValueLarge}>KSh {MOCK_TRANSPORTER_STATS.earnings.toLocaleString()}</Text>
-              <View style={styles.statChange}>
-                <Ionicons name="trending-up" size={14} color="#4CAF50" />
-                <Text style={styles.statChangeText}>+{MOCK_TRANSPORTER_STATS.earningsChange}% this month</Text>
+        {isTransporter && (() => {
+          const s = stats || FALLBACK_TRANSPORTER_STATS;
+          return (
+            <>
+              <View style={styles.statCardPrimary}>
+                <Text style={styles.statLabel}>Deliveries</Text>
+                <Text style={styles.statValueLarge}>{s.totalDeliveries || 0}</Text>
+                <View style={styles.statChange}>
+                  <Ionicons name="car" size={14} color="#A5D6A7" />
+                  <Text style={styles.statChangeText}>{s.activeJobs || 0} active now</Text>
+                </View>
               </View>
-            </View>
-            <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_TRANSPORTER_STATS.availableJobs}</Text>
-                <Text style={styles.statLabel}>Available</Text>
-                <Text style={styles.statSubHighlight}>jobs</Text>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.activeJobs || 0}</Text>
+                  <Text style={styles.statLabel}>Active</Text>
+                  <Text style={styles.statSubHighlight}>jobs</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.totalDeliveries || 0}</Text>
+                  <Text style={styles.statLabel}>Done</Text>
+                  <Text style={styles.statSub}>deliveries</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{s.rating?.toFixed(1) || '-'}</Text>
+                  <Text style={styles.statLabel}>Rating</Text>
+                  <Text style={styles.statSub}>{s.totalRatings} reviews</Text>
+                </View>
               </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_TRANSPORTER_STATS.activeDeliveries}</Text>
-                <Text style={styles.statLabel}>Active</Text>
-                <Text style={styles.statSub}>deliveries</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>{MOCK_TRANSPORTER_STATS.onTimeRate}%</Text>
-                <Text style={styles.statLabel}>On-Time</Text>
-                <Text style={styles.statSub}>rate</Text>
-              </View>
-            </View>
-          </>
-        )}
+            </>
+          );
+        })()}
       </View>
 
       {/* AI Insights */}

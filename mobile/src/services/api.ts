@@ -404,4 +404,194 @@ export async function getTrustScoreSummary(userId: string): Promise<TrustScoreSu
   return response.data;
 }
 
+// ============================================
+// USER STATS & PROFILE
+// ============================================
+
+export type UserStats = {
+  role: string;
+  name: string;
+  rating: number | null;
+  totalRatings: number;
+  // Farmer-specific
+  totalListings?: number;
+  activeListings?: number;
+  totalSold?: number;
+  totalRevenue?: number;
+  // Buyer-specific
+  totalPurchases?: number;
+  totalSpent?: number;
+  activeOffers?: number;
+  // Transporter-specific
+  totalDeliveries?: number;
+  activeJobs?: number;
+};
+
+export type UserTransaction = {
+  id: string;
+  crop: string;
+  quantity: number;
+  unit: string;
+  agreedPrice: number;
+  status: string;
+  farmer: { id: string; name: string };
+  buyer: { id: string; name: string };
+  county: string;
+  paymentMethod: string | null;
+  paymentRef: string | null;
+  pickupDate: string | null;
+  deliveredAt: string | null;
+  createdAt: string;
+};
+
+export type PaginatedResponse<T> = {
+  success: boolean;
+  data: T[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+};
+
+export async function getUserStats(userId: string): Promise<UserStats> {
+  const response = await api.get<{ success: boolean; data: UserStats }>(`/users/${userId}/stats`);
+  return response.data.data;
+}
+
+export async function updateUserProfile(userId: string, data: {
+  name?: string;
+  county?: string;
+  subCounty?: string;
+  ward?: string;
+  language?: string;
+  vehicleType?: string;
+  vehicleCapacity?: number;
+}): Promise<any> {
+  const response = await api.put(`/users/${userId}`, data);
+  return response.data.data;
+}
+
+export async function getUserTransactions(userId: string, params?: {
+  page?: number;
+  limit?: number;
+  status?: string;
+}): Promise<PaginatedResponse<UserTransaction>> {
+  const query = new URLSearchParams();
+  if (params?.page) query.append('page', params.page.toString());
+  if (params?.limit) query.append('limit', params.limit.toString());
+  if (params?.status) query.append('status', params.status);
+
+  const response = await api.get<PaginatedResponse<UserTransaction>>(
+    `/users/${userId}/transactions?${query.toString()}`
+  );
+  return response.data;
+}
+
+// ============================================
+// DELIVERIES
+// ============================================
+
+export type AvailableDelivery = {
+  transactionId: string;
+  crop: string;
+  quantity: number;
+  unit: string;
+  agreedPrice: number;
+  pickup: {
+    county: string;
+    farmerName: string;
+    farmerPhone: string;
+  };
+  delivery: {
+    county: string | null;
+    buyerName: string;
+    buyerPhone: string;
+  };
+  createdAt: string;
+};
+
+export type MyDelivery = AvailableDelivery & {
+  status: string;
+  pickupDate: string | null;
+  deliveredAt: string | null;
+};
+
+export async function getAvailableDeliveries(params?: {
+  county?: string;
+  limit?: number;
+}): Promise<AvailableDelivery[]> {
+  const query = new URLSearchParams();
+  if (params?.county) query.append('county', params.county);
+  if (params?.limit) query.append('limit', params.limit.toString());
+
+  const response = await api.get<{ success: boolean; data: AvailableDelivery[] }>(
+    `/deliveries/available?${query.toString()}`
+  );
+  return response.data.data;
+}
+
+export async function acceptDelivery(transactionId: string, transporterId: string): Promise<{
+  transactionId: string;
+  status: string;
+  transporterId: string;
+  pickupDate: string;
+}> {
+  const response = await api.post(`/deliveries/${transactionId}/accept`, { transporterId });
+  return response.data.data;
+}
+
+export async function completeDelivery(transactionId: string): Promise<{
+  transactionId: string;
+  status: string;
+  deliveredAt: string;
+}> {
+  const response = await api.put(`/deliveries/${transactionId}/complete`);
+  return response.data.data;
+}
+
+export async function getMyDeliveries(transporterId: string, params?: {
+  status?: string;
+  limit?: number;
+}): Promise<MyDelivery[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.append('status', params.status);
+  if (params?.limit) query.append('limit', params.limit.toString());
+
+  const response = await api.get<{ success: boolean; data: MyDelivery[] }>(
+    `/deliveries/my/${transporterId}?${query.toString()}`
+  );
+  return response.data.data;
+}
+
+// ============================================
+// GRADING DISPUTES
+// ============================================
+
+export async function disputeGrade(gradingId: string, reason?: string): Promise<{
+  id: string;
+  isDisputed: boolean;
+  reviewStatus: string;
+  grade: string;
+}> {
+  const response = await api.post(`/grading/${gradingId}/dispute`, { reason });
+  return response.data.data;
+}
+
+export async function getPendingReviews(): Promise<any[]> {
+  const response = await api.get('/grading/pending-reviews');
+  return response.data.data;
+}
+
+export async function reviewGrade(gradingId: string, data: {
+  action: 'approve' | 'override';
+  newGrade?: string;
+  reviewedBy: string;
+  notes?: string;
+}): Promise<any> {
+  const response = await api.put(`/grading/${gradingId}/review`, data);
+  return response.data.data;
+}
+
 export { api };

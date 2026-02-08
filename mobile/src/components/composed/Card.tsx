@@ -30,7 +30,7 @@ export function Card({
   padding = 4,
   fullWidth = true,
   style,
-}: CardProps): JSX.Element {
+}: CardProps): React.JSX.Element {
   const { theme } = useTheme();
 
   // Get variant styles

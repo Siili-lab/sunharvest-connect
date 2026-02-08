@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import { View, ViewStyle, StyleSheet } from 'react-native';
+import { View, ViewStyle, DimensionValue, StyleSheet } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 import { spacing, radius } from '../../theme/tokens';
 
@@ -107,7 +107,7 @@ export function Box({
   accessible,
   accessibilityLabel,
   accessibilityRole,
-}: BoxProps): JSX.Element {
+}: BoxProps): React.JSX.Element {
   const { theme } = useTheme();
 
   const computedStyle: ViewStyle = {
@@ -141,10 +141,10 @@ export function Box({
     ...(flexWrap !== undefined && { flexWrap }),
 
     // Sizing
-    ...(width !== undefined && { width }),
-    ...(height !== undefined && { height }),
+    ...(width !== undefined && { width: width as DimensionValue }),
+    ...(height !== undefined && { height: height as DimensionValue }),
     ...(minHeight !== undefined && { minHeight }),
-    ...(maxWidth !== undefined && { maxWidth }),
+    ...(maxWidth !== undefined && { maxWidth: maxWidth as DimensionValue }),
 
     // Appearance
     ...(backgroundColor !== undefined && { backgroundColor }),

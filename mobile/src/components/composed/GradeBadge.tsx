@@ -68,7 +68,7 @@ export function GradeBadge({
   showConfidence = false,
   confidence,
   style,
-}: GradeBadgeProps): JSX.Element {
+}: GradeBadgeProps): React.JSX.Element {
   const { i18n } = useTranslation();
   const config = gradeConfig[grade];
   const lang = i18n.language === 'sw' ? 'sw' : 'en';
@@ -157,7 +157,7 @@ interface GradeIndicatorProps {
   grade: QualityGrade;
 }
 
-export function GradeIndicator({ grade }: GradeIndicatorProps): JSX.Element {
+export function GradeIndicator({ grade }: GradeIndicatorProps): React.JSX.Element {
   const config = gradeConfig[grade];
 
   return (

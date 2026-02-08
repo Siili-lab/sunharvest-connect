@@ -51,7 +51,7 @@ export function Button({
   style,
   accessibilityLabel,
   accessibilityHint,
-}: ButtonProps): JSX.Element {
+}: ButtonProps): React.JSX.Element {
   const { theme } = useTheme();
   const isDisabled = disabled || loading;
 

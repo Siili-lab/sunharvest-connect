@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,14 @@ import {
   Alert,
   Modal,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import {
+  getAvailableDeliveries, getMyDeliveries, acceptDelivery, completeDelivery,
+  AvailableDelivery, MyDelivery,
+} from '../services/api';
 
 type DeliveryStatus = 'available' | 'accepted' | 'picked_up' | 'in_transit' | 'delivered' | 'completed';
 
@@ -45,91 +50,97 @@ const STATUS_CONFIG: Record<DeliveryStatus, { label: string; color: string; icon
   completed: { label: 'Completed', color: '#388E3C', icon: 'checkmark-done-circle' },
 };
 
-// Mock data
-const MOCK_JOBS: DeliveryJob[] = [
-  {
-    id: '1',
-    cropType: 'Tomatoes',
-    quantity: 500,
-    unit: 'kg',
-    pickupLocation: 'Kiambu Farm, Kiambu County',
-    deliveryLocation: 'Wakulima Market, Nairobi',
-    distance: 28,
-    payment: 2500,
+// Helper to map API data to the UI DeliveryJob shape
+function mapAvailableToJob(d: AvailableDelivery): DeliveryJob {
+  const crop = typeof d.crop === 'string'
+    ? d.crop.charAt(0) + d.crop.slice(1).toLowerCase()
+    : d.crop;
+  return {
+    id: d.transactionId,
+    cropType: crop,
+    quantity: d.quantity,
+    unit: d.unit,
+    pickupLocation: d.pickup.county,
+    deliveryLocation: d.delivery.county || 'TBD',
+    distance: 0,
+    payment: d.agreedPrice,
     status: 'available',
-    farmerName: 'John Kamau',
-    farmerPhone: '+254712345678',
-    buyerName: 'Fresh Mart Ltd',
-    buyerPhone: '+254723456789',
-    deliveryDeadline: '2024-01-15 14:00',
-    specialInstructions: 'Handle with care, ripe tomatoes',
-  },
-  {
-    id: '2',
-    cropType: 'Cabbage',
-    quantity: 300,
-    unit: 'kg',
-    pickupLocation: 'Limuru Farms, Kiambu',
-    deliveryLocation: 'Githurai Market',
-    distance: 15,
-    payment: 1500,
-    status: 'available',
-    farmerName: 'Mary Wanjiku',
-    farmerPhone: '+254734567890',
-    buyerName: 'Green Grocers',
-    buyerPhone: '+254745678901',
-    deliveryDeadline: '2024-01-15 16:00',
-  },
-  {
-    id: '3',
-    cropType: 'Potatoes',
-    quantity: 1000,
-    unit: 'kg',
-    pickupLocation: 'Nyandarua Farm',
-    deliveryLocation: 'Muthurwa Market, Nairobi',
-    distance: 120,
-    payment: 8500,
-    status: 'accepted',
-    farmerName: 'Peter Mwangi',
-    farmerPhone: '+254756789012',
-    buyerName: 'Nairobi Vegetables Co.',
-    buyerPhone: '+254767890123',
-    deliveryDeadline: '2024-01-16 10:00',
-    pickupTime: '2024-01-16 06:00',
-    specialInstructions: 'Early morning pickup required',
-  },
-  {
-    id: '4',
-    cropType: 'Onions',
-    quantity: 200,
-    unit: 'kg',
-    pickupLocation: 'Kajiado Farm',
-    deliveryLocation: 'City Market, Nairobi',
-    distance: 45,
-    payment: 3200,
-    status: 'in_transit',
-    farmerName: 'David Ochieng',
-    farmerPhone: '+254778901234',
-    buyerName: 'City Traders',
-    buyerPhone: '+254789012345',
-    deliveryDeadline: '2024-01-15 12:00',
-    pickupTime: '2024-01-15 08:00',
-  },
-];
+    farmerName: d.pickup.farmerName,
+    farmerPhone: d.pickup.farmerPhone,
+    buyerName: d.delivery.buyerName,
+    buyerPhone: d.delivery.buyerPhone,
+    deliveryDeadline: new Date(d.createdAt).toLocaleDateString(),
+  };
+}
+
+function mapMyDeliveryToJob(d: MyDelivery): DeliveryJob {
+  const crop = typeof d.crop === 'string'
+    ? d.crop.charAt(0) + d.crop.slice(1).toLowerCase()
+    : d.crop;
+  // Map backend statuses to local UI statuses
+  const statusMap: Record<string, DeliveryStatus> = {
+    IN_TRANSIT: 'in_transit',
+    DELIVERED: 'delivered',
+    COMPLETED: 'completed',
+    PAID: 'accepted',
+  };
+  return {
+    id: d.transactionId,
+    cropType: crop,
+    quantity: d.quantity,
+    unit: d.unit,
+    pickupLocation: d.pickup.county,
+    deliveryLocation: d.delivery.county || 'TBD',
+    distance: 0,
+    payment: d.agreedPrice,
+    status: statusMap[d.status] || 'accepted',
+    farmerName: d.pickup.farmerName,
+    farmerPhone: d.pickup.farmerPhone,
+    buyerName: d.delivery.buyerName,
+    buyerPhone: d.delivery.buyerPhone,
+    pickupTime: d.pickupDate || undefined,
+    deliveryDeadline: d.deliveredAt || new Date(d.createdAt).toLocaleDateString(),
+  };
+}
 
 export default function DeliveriesScreen() {
   const { user } = useAuth();
-  const [jobs, setJobs] = useState<DeliveryJob[]>(MOCK_JOBS);
+  const [jobs, setJobs] = useState<DeliveryJob[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'available' | 'my_jobs'>('available');
   const [selectedJob, setSelectedJob] = useState<DeliveryJob | null>(null);
   const [showJobModal, setShowJobModal] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [deliveryNote, setDeliveryNote] = useState('');
 
-  const onRefresh = () => {
+  const loadJobs = useCallback(async () => {
+    try {
+      const [available, mine] = await Promise.all([
+        getAvailableDeliveries().catch(() => []),
+        user?.id ? getMyDeliveries(user.id).catch(() => []) : Promise.resolve([]),
+      ]);
+
+      const allJobs: DeliveryJob[] = [
+        ...available.map(mapAvailableToJob),
+        ...mine.map(mapMyDeliveryToJob),
+      ];
+      setJobs(allJobs);
+    } catch {
+      // Keep whatever jobs we have
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
+
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    await loadJobs();
+    setRefreshing(false);
   };
 
   const availableJobs = jobs.filter(j => j.status === 'available');
@@ -148,19 +159,25 @@ export default function DeliveriesScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Accept',
-          onPress: () => {
-            setJobs(prev => prev.map(j =>
-              j.id === job.id ? { ...j, status: 'accepted' as DeliveryStatus } : j
-            ));
-            setShowJobModal(false);
-            Alert.alert('Success', 'Job accepted! Contact the farmer to arrange pickup.');
+          onPress: async () => {
+            try {
+              await acceptDelivery(job.id, user?.id || '');
+              setJobs(prev => prev.map(j =>
+                j.id === job.id ? { ...j, status: 'accepted' as DeliveryStatus } : j
+              ));
+              setShowJobModal(false);
+              Alert.alert('Success', 'Job accepted! Contact the farmer to arrange pickup.');
+            } catch (err: any) {
+              const msg = err?.response?.data?.error?.message || 'Failed to accept job';
+              Alert.alert('Error', msg);
+            }
           },
         },
       ]
     );
   };
 
-  const updateJobStatus = (job: DeliveryJob, newStatus: DeliveryStatus) => {
+  const updateJobStatus = async (job: DeliveryJob, newStatus: DeliveryStatus) => {
     const statusMessages: Record<DeliveryStatus, string> = {
       available: '',
       accepted: 'Job accepted',
@@ -169,6 +186,17 @@ export default function DeliveriesScreen() {
       delivered: 'Cargo delivered to buyer',
       completed: 'Delivery completed and payment received',
     };
+
+    // For the "delivered" transition, call the backend complete endpoint
+    if (newStatus === 'delivered' || newStatus === 'completed') {
+      try {
+        await completeDelivery(job.id);
+      } catch (err: any) {
+        const msg = err?.response?.data?.error?.message || 'Failed to update status';
+        Alert.alert('Error', msg);
+        return;
+      }
+    }
 
     setJobs(prev => prev.map(j =>
       j.id === job.id ? { ...j, status: newStatus } : j
@@ -321,7 +349,12 @@ export default function DeliveriesScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
-        {activeTab === 'available' ? (
+        {loading ? (
+          <View style={styles.emptyState}>
+            <ActivityIndicator size="large" color="#2E7D32" />
+            <Text style={styles.emptyText}>Loading deliveries...</Text>
+          </View>
+        ) : activeTab === 'available' ? (
           availableJobs.length > 0 ? (
             availableJobs.map(job => renderJobCard(job, false))
           ) : (

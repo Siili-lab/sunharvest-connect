@@ -14,8 +14,13 @@ import { colors, spacing, layout, radius, typography, shadows } from './tokens';
 
 // ===== Theme Type Definitions =====
 
+type ThemeColors = Omit<typeof colors, 'background' | 'text'> & {
+  background: { primary: string; secondary: string; tertiary: string; elevated: string };
+  text: { primary: string; secondary: string; disabled: string; inverse: string; link: string };
+};
+
 interface Theme {
-  colors: typeof colors;
+  colors: ThemeColors;
   spacing: typeof spacing;
   layout: typeof layout;
   radius: typeof radius;
@@ -95,7 +100,7 @@ interface ThemeProviderProps {
   children: ReactNode;
 }
 
-export function ThemeProvider({ children }: ThemeProviderProps): JSX.Element {
+export function ThemeProvider({ children }: ThemeProviderProps): React.JSX.Element {
   const systemColorScheme = useColorScheme();
   const [themeMode, setThemeMode] = useState<'light' | 'dark' | 'system'>('system');
 

@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import { Text as RNText, TextStyle, StyleSheet } from 'react-native';
+import { Text as RNText, TextStyle, StyleProp, StyleSheet } from 'react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 import { typography, TypographyToken } from '../../theme/tokens';
 
@@ -30,7 +30,7 @@ interface TextProps {
 
   // Other
   selectable?: boolean;
-  style?: TextStyle;
+  style?: StyleProp<TextStyle>;
 
   // Accessibility
   accessibilityRole?: 'none' | 'text' | 'header' | 'link';
@@ -57,7 +57,7 @@ export function Text({
   accessibilityRole,
   accessibilityLabel,
   onPress,
-}: TextProps): JSX.Element {
+}: TextProps): React.JSX.Element {
   const { theme } = useTheme();
 
   // Get color value
@@ -121,22 +121,22 @@ export function Text({
   );
 }
 
-export function Heading1({ children, ...props }: Omit<TextProps, 'variant'>): JSX.Element {
+export function Heading1({ children, ...props }: Omit<TextProps, 'variant'>): React.JSX.Element {
   return <Text variant="heading1" accessibilityRole="header" {...props}>{children}</Text>;
 }
 
-export function Heading2({ children, ...props }: Omit<TextProps, 'variant'>): JSX.Element {
+export function Heading2({ children, ...props }: Omit<TextProps, 'variant'>): React.JSX.Element {
   return <Text variant="heading2" accessibilityRole="header" {...props}>{children}</Text>;
 }
 
-export function Heading3({ children, ...props }: Omit<TextProps, 'variant'>): JSX.Element {
+export function Heading3({ children, ...props }: Omit<TextProps, 'variant'>): React.JSX.Element {
   return <Text variant="heading3" accessibilityRole="header" {...props}>{children}</Text>;
 }
 
-export function Body({ children, ...props }: Omit<TextProps, 'variant'>): JSX.Element {
+export function Body({ children, ...props }: Omit<TextProps, 'variant'>): React.JSX.Element {
   return <Text variant="body" {...props}>{children}</Text>;
 }
 
-export function Caption({ children, ...props }: Omit<TextProps, 'variant'>): JSX.Element {
+export function Caption({ children, ...props }: Omit<TextProps, 'variant'>): React.JSX.Element {
   return <Text variant="caption" color="secondary" {...props}>{children}</Text>;
 }
