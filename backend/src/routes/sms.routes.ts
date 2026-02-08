@@ -1,6 +1,33 @@
 import { Router, Request, Response } from 'express';
+import { PrismaClient } from '@prisma/client';
+import { mapCropToEnum } from '../utils/cropMapping';
+import { calculateTrends, BASE_PRICES } from '../services/marketDataService';
 
 const router = Router();
+const prisma = new PrismaClient();
+
+// Africa's Talking SDK initialization
+let atSms: any = null;
+const AT_USERNAME = process.env.AT_USERNAME;
+const AT_API_KEY = process.env.AT_API_KEY;
+const AT_SENDER_ID = process.env.AT_SENDER_ID;
+
+if (AT_USERNAME && AT_API_KEY) {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const AfricasTalking = require('africastalking');
+    const at = AfricasTalking({
+      apiKey: AT_API_KEY,
+      username: AT_USERNAME,
+    });
+    atSms = at.SMS;
+    console.log('[SMS] Africa\'s Talking SDK initialized');
+  } catch (err) {
+    console.warn('[SMS] Failed to initialize Africa\'s Talking SDK:', err);
+  }
+} else {
+  console.warn('[SMS] AT_USERNAME / AT_API_KEY not set — SMS sending disabled');
+}
 
 // Swahili crop keywords
 const cropKeywords: Record<string, string> = {
@@ -9,22 +36,15 @@ const cropKeywords: Record<string, string> = {
   vitunguu: 'onion',
   kabichi: 'cabbage',
   karoti: 'carrot',
-  sukuma: 'sukuma',
+  sukuma: 'kale',
   spinachi: 'spinach',
   tomato: 'tomato',
   potato: 'potato',
   onion: 'onion',
-};
-
-// Mock prices
-const prices: Record<string, number> = {
-  tomato: 80,
-  potato: 60,
-  onion: 70,
-  cabbage: 40,
-  carrot: 50,
-  sukuma: 20,
-  spinach: 30,
+  mango: 'mango',
+  avocado: 'avocado',
+  ndizi: 'banana',
+  banana: 'banana',
 };
 
 function parseMessage(text: string): { intent: string; crop?: string } {
@@ -54,7 +74,23 @@ function parseMessage(text: string): { intent: string; crop?: string } {
   return { intent: 'unknown' };
 }
 
-function generateResponse(intent: string, crop?: string, lang: string = 'sw'): string {
+async function getMarketPrice(crop: string): Promise<{ price: number; trend: string } | null> {
+  try {
+    const cropEnum = mapCropToEnum(crop);
+    const trends = await calculateTrends(cropEnum);
+    return { price: trends.currentPrice, trend: trends.trend };
+  } catch {
+    // Fallback to static base prices
+    const cropEnum = mapCropToEnum(crop);
+    const base = BASE_PRICES[cropEnum];
+    if (base) {
+      return { price: base.avg, trend: 'STABLE' };
+    }
+    return null;
+  }
+}
+
+async function generateResponse(intent: string, crop?: string, lang: string = 'sw'): Promise<string> {
   if (intent === 'help') {
     return lang === 'sw'
       ? 'Tuma "bei nyanya" kupata bei ya soko. Mazao: nyanya, viazi, vitunguu, kabichi, karoti, sukuma'
@@ -62,17 +98,67 @@ function generateResponse(intent: string, crop?: string, lang: string = 'sw'): s
   }
 
   if (intent === 'price_check' && crop) {
-    const price = prices[crop];
-    if (price) {
+    const marketData = await getMarketPrice(crop);
+    if (marketData) {
+      const trendEmoji = marketData.trend === 'RISING' ? '↑' : marketData.trend === 'FALLING' ? '↓' : '→';
       return lang === 'sw'
-        ? `Bei ya ${crop}: KSh ${price}/kg (Wakulima Market)`
-        : `${crop} price: KSh ${price}/kg (Wakulima Market)`;
+        ? `Bei ya ${crop}: KSh ${marketData.price}/kg ${trendEmoji} (Wakulima Market)`
+        : `${crop} price: KSh ${marketData.price}/kg ${trendEmoji} (Wakulima Market)`;
     }
   }
 
   return lang === 'sw'
     ? 'Samahani, sijui hilo. Tuma "msaada" kwa usaidizi.'
     : 'Sorry, I did not understand. Send "help" for assistance.';
+}
+
+async function sendSms(to: string, message: string): Promise<string | null> {
+  if (!atSms) {
+    console.warn('[SMS] Sending disabled — no AT credentials. Would send to', to);
+    return null;
+  }
+
+  try {
+    const options: any = { to: [to], message };
+    if (AT_SENDER_ID) {
+      options.from = AT_SENDER_ID;
+    }
+    const result = await atSms.send(options);
+    const recipient = result?.SMSMessageData?.Recipients?.[0];
+    return recipient?.messageId || null;
+  } catch (err) {
+    console.error('[SMS] Failed to send SMS:', err);
+    return null;
+  }
+}
+
+async function logSms(
+  phone: string,
+  direction: 'INBOUND' | 'OUTBOUND',
+  message: string,
+  intent?: string,
+  entities?: any,
+  atMessageId?: string | null,
+): Promise<void> {
+  try {
+    // Try to find user by phone
+    const user = await prisma.user.findUnique({ where: { phone } });
+
+    await prisma.smsLog.create({
+      data: {
+        userId: user?.id || null,
+        phone,
+        direction,
+        message,
+        intent: intent || null,
+        entities: entities || null,
+        atMessageId: atMessageId || null,
+        status: direction === 'INBOUND' ? 'DELIVERED' : (atMessageId ? 'SENT' : 'PENDING'),
+      },
+    });
+  } catch (err) {
+    console.error('[SMS] Failed to log SMS:', err);
+  }
 }
 
 // POST /api/v1/sms/incoming - Africa's Talking webhook
@@ -82,13 +168,19 @@ router.post('/incoming', async (req: Request, res: Response) => {
   console.log(`[SMS] From: ${from}, Text: ${text}`);
 
   const { intent, crop } = parseMessage(text || '');
-  const response = generateResponse(intent, crop);
+  const response = await generateResponse(intent, crop);
 
-  // Log for audit
+  // Log inbound message
+  await logSms(from, 'INBOUND', text || '', intent, crop ? { crop } : null);
+
+  // Send reply via Africa's Talking
+  const atMessageId = await sendSms(from, response);
+
+  // Log outbound message
+  await logSms(from, 'OUTBOUND', response, intent, crop ? { crop } : null, atMessageId);
+
   console.log(`[SMS Response] To: ${from}, Message: ${response}`);
 
-  // TODO: Send response via Africa's Talking API
-  // For now just return what we would send
   res.json({
     success: true,
     data: {
@@ -97,6 +189,7 @@ router.post('/incoming', async (req: Request, res: Response) => {
       intent,
       crop,
       response,
+      sent: !!atMessageId,
     },
   });
 });
@@ -113,7 +206,7 @@ router.get('/test', async (req: Request, res: Response) => {
   }
 
   const { intent, crop } = parseMessage(message);
-  const response = generateResponse(intent, crop);
+  const response = await generateResponse(intent, crop);
 
   res.json({
     success: true,

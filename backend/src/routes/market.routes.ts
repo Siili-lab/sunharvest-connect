@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { CropType, QualityGrade, PrismaClient } from '@prisma/client';
+import { CropType, PrismaClient } from '@prisma/client';
 import { predictPrice, getCachedPrediction } from '../services/pricePredictor';
 import { predictSuccess, getSuccessStats } from '../services/successPredictor';
 import { calculateTrends, BASE_PRICES, KENYA_MARKETS } from '../services/marketDataService';
+import { mapCropToEnum, mapGradeToEnum } from '../utils/cropMapping';
+import { requireAuth, optionalAuth } from '../middleware/auth';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -24,46 +26,8 @@ const successEstimateSchema = z.object({
   county: z.string(),
 });
 
-// Map user-friendly names to enum values
-function mapCropToEnum(crop: string): CropType {
-  const mapping: Record<string, CropType> = {
-    'tomato': 'TOMATOES',
-    'tomatoes': 'TOMATOES',
-    'mango': 'MANGOES',
-    'mangoes': 'MANGOES',
-    'onion': 'ONIONS',
-    'onions': 'ONIONS',
-    'potato': 'POTATOES',
-    'potatoes': 'POTATOES',
-    'cabbage': 'CABBAGE',
-    'kale': 'KALE',
-    'sukuma': 'KALE',
-    'spinach': 'SPINACH',
-    'avocado': 'AVOCADO',
-    'banana': 'BANANAS',
-    'bananas': 'BANANAS',
-    'orange': 'ORANGES',
-    'oranges': 'ORANGES',
-    'pepper': 'PEPPERS',
-    'peppers': 'PEPPERS',
-    'carrot': 'CARROTS',
-    'carrots': 'CARROTS',
-  };
-  return mapping[crop.toLowerCase()] || 'OTHER';
-}
-
-function mapGradeToEnum(grade: string): QualityGrade {
-  const mapping: Record<string, QualityGrade> = {
-    'Premium': 'PREMIUM',
-    'Grade A': 'GRADE_A',
-    'Grade B': 'GRADE_B',
-    'Reject': 'REJECT',
-  };
-  return mapping[grade] || 'GRADE_A';
-}
-
-// GET /api/v1/market/prices - Get current market prices
-router.get('/prices', async (req: Request, res: Response) => {
+// GET /api/v1/market/prices - Get current market prices (public)
+router.get('/prices', optionalAuth, async (req: Request, res: Response) => {
   try {
     const { crop, county } = req.query;
 
@@ -122,8 +86,8 @@ router.get('/prices', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/v1/market/predict-price - AI price recommendation
-router.post('/predict-price', async (req: Request, res: Response) => {
+// POST /api/v1/market/predict-price - AI price recommendation (auth required)
+router.post('/predict-price', requireAuth, async (req: Request, res: Response) => {
   try {
     const data = predictPriceSchema.parse(req.body);
 
@@ -184,8 +148,8 @@ router.post('/predict-price', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/v1/market/success-estimate - Predict time to sell
-router.post('/success-estimate', async (req: Request, res: Response) => {
+// POST /api/v1/market/success-estimate - Predict time to sell (auth required)
+router.post('/success-estimate', requireAuth, async (req: Request, res: Response) => {
   try {
     const data = successEstimateSchema.parse(req.body);
 
@@ -220,8 +184,8 @@ router.post('/success-estimate', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/v1/market/trends - Get price trends
-router.get('/trends', async (req: Request, res: Response) => {
+// GET /api/v1/market/trends - Get price trends (public)
+router.get('/trends', optionalAuth, async (req: Request, res: Response) => {
   try {
     const { crop, county } = req.query;
 
@@ -301,8 +265,8 @@ router.get('/trends', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/v1/market/intelligence - Full market dashboard
-router.get('/intelligence', async (req: Request, res: Response) => {
+// GET /api/v1/market/intelligence - Full market dashboard (public)
+router.get('/intelligence', optionalAuth, async (req: Request, res: Response) => {
   try {
     const { county } = req.query;
 

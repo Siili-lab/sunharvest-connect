@@ -1,18 +1,21 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient, TransactionStatus } from '@prisma/client';
+import { requireAuth, requireBuyer, requireFarmer, requireRole, AuthenticatedRequest } from '../middleware/auth';
+import { requireSelfOrAdmin, requireTransactionParty } from '../middleware/ownership';
 
 const router = Router();
 const prisma = new PrismaClient();
 
-// POST /offers - Create new offer
-router.post('/', async (req: Request, res: Response) => {
+// POST /offers - Create new offer (buyer only, use token userId)
+router.post('/', requireAuth, requireBuyer, async (req: Request, res: Response) => {
   try {
-    const { listingId, buyerId, quantity, price, message } = req.body;
+    const buyerId = (req as AuthenticatedRequest).user.userId;
+    const { listingId, quantity, price, message } = req.body;
 
-    if (!listingId || !buyerId || !quantity || !price) {
+    if (!listingId || !quantity || !price) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['listingId', 'buyerId', 'quantity', 'price'],
+        required: ['listingId', 'quantity', 'price'],
       });
     }
 
@@ -87,8 +90,8 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /offers/buyer/:buyerId - Get offers made by a buyer
-router.get('/buyer/:buyerId', async (req: Request, res: Response) => {
+// GET /offers/buyer/:buyerId - Get offers made by a buyer (self or admin)
+router.get('/buyer/:buyerId', requireAuth, requireSelfOrAdmin('buyerId'), async (req: Request, res: Response) => {
   try {
     const { buyerId } = req.params;
     const { status } = req.query;
@@ -129,8 +132,8 @@ router.get('/buyer/:buyerId', async (req: Request, res: Response) => {
   }
 });
 
-// GET /offers/farmer/:farmerId - Get offers received by a farmer
-router.get('/farmer/:farmerId', async (req: Request, res: Response) => {
+// GET /offers/farmer/:farmerId - Get offers received by a farmer (self or admin)
+router.get('/farmer/:farmerId', requireAuth, requireSelfOrAdmin('farmerId'), async (req: Request, res: Response) => {
   try {
     const { farmerId } = req.params;
     const { status } = req.query;
@@ -172,10 +175,28 @@ router.get('/farmer/:farmerId', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /offers/:id/accept - Farmer accepts offer
-router.put('/:id/accept', async (req: Request, res: Response) => {
+// PUT /offers/:id/accept - Farmer accepts offer (verify farmer owns listing)
+router.put('/:id/accept', requireAuth, requireFarmer, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = (req as AuthenticatedRequest).user.userId;
+
+    // Fetch the offer and verify the farmer owns the listing
+    const existingOffer = await prisma.transaction.findUnique({
+      where: { id },
+      include: { listing: { select: { farmerId: true } } },
+    });
+
+    if (!existingOffer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    if (existingOffer.listing.farmerId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You do not own the listing for this offer.' },
+      });
+    }
 
     const offer = await prisma.transaction.update({
       where: { id },
@@ -209,10 +230,28 @@ router.put('/:id/accept', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /offers/:id/decline - Farmer declines offer
-router.put('/:id/decline', async (req: Request, res: Response) => {
+// PUT /offers/:id/decline - Farmer declines offer (verify farmer owns listing)
+router.put('/:id/decline', requireAuth, requireFarmer, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = (req as AuthenticatedRequest).user.userId;
+
+    // Fetch the offer and verify the farmer owns the listing
+    const existingOffer = await prisma.transaction.findUnique({
+      where: { id },
+      include: { listing: { select: { farmerId: true } } },
+    });
+
+    if (!existingOffer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    if (existingOffer.listing.farmerId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You do not own the listing for this offer.' },
+      });
+    }
 
     const offer = await prisma.transaction.update({
       where: { id },
@@ -238,11 +277,28 @@ router.put('/:id/decline', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /offers/:id/pay - Mark as paid (M-Pesa callback would call this)
-router.put('/:id/pay', async (req: Request, res: Response) => {
+// PUT /offers/:id/pay - Mark as paid (buyer only, verify buyer owns transaction)
+router.put('/:id/pay', requireAuth, requireBuyer, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = (req as AuthenticatedRequest).user.userId;
     const { paymentRef, paymentMethod = 'MPESA' } = req.body;
+
+    // Verify buyer owns this transaction
+    const existingOffer = await prisma.transaction.findUnique({
+      where: { id },
+    });
+
+    if (!existingOffer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    if (existingOffer.buyerId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You are not the buyer for this transaction.' },
+      });
+    }
 
     const offer = await prisma.transaction.update({
       where: { id },
@@ -269,10 +325,31 @@ router.put('/:id/pay', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /offers/:id/deliver - Mark as delivered
-router.put('/:id/deliver', async (req: Request, res: Response) => {
+// PUT /offers/:id/deliver - Mark as delivered (farmer or transporter, verify party)
+router.put('/:id/deliver', requireAuth, requireRole('FARMER', 'TRANSPORTER'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = (req as AuthenticatedRequest).user.userId;
+
+    // Verify user is a party to this transaction
+    const existingOffer = await prisma.transaction.findUnique({
+      where: { id },
+      include: { listing: { select: { farmerId: true } } },
+    });
+
+    if (!existingOffer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    const isFarmer = existingOffer.listing.farmerId === userId;
+    const isTransporter = existingOffer.transporterId === userId;
+
+    if (!isFarmer && !isTransporter) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You are not authorized to mark this as delivered.' },
+      });
+    }
 
     const offer = await prisma.transaction.update({
       where: { id },
@@ -293,11 +370,28 @@ router.put('/:id/deliver', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /offers/:id/complete - Buyer confirms receipt, release escrow
-router.put('/:id/complete', async (req: Request, res: Response) => {
+// PUT /offers/:id/complete - Buyer confirms receipt (verify buyer owns transaction)
+router.put('/:id/complete', requireAuth, requireBuyer, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = (req as AuthenticatedRequest).user.userId;
     const { rating, review } = req.body;
+
+    // Verify buyer owns this transaction
+    const existingOffer = await prisma.transaction.findUnique({
+      where: { id },
+    });
+
+    if (!existingOffer) {
+      return res.status(404).json({ error: 'Offer not found' });
+    }
+
+    if (existingOffer.buyerId !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'You are not the buyer for this transaction.' },
+      });
+    }
 
     const offer = await prisma.transaction.update({
       where: { id },
@@ -324,8 +418,8 @@ router.put('/:id/complete', async (req: Request, res: Response) => {
   }
 });
 
-// GET /offers/:id - Get single offer details
-router.get('/:id', async (req: Request, res: Response) => {
+// GET /offers/:id - Get single offer details (transaction party only)
+router.get('/:id', requireAuth, requireTransactionParty, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

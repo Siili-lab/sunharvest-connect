@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient, CropType, QualityGrade, ListingStatus } from '@prisma/client';
+import { requireAuth, requireFarmer, optionalAuth, AuthenticatedRequest } from '../middleware/auth';
+import { requireListingOwnership } from '../middleware/ownership';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -33,8 +35,8 @@ const gradeMap: Record<string, QualityGrade> = {
   reject: 'REJECT',
 };
 
-// GET /listings - Get all active listings
-router.get('/', async (req: Request, res: Response) => {
+// GET /listings - Get all active listings (public)
+router.get('/', optionalAuth, async (req: Request, res: Response) => {
   try {
     const { crop, county, grade, minPrice, maxPrice, limit = 50 } = req.query;
 
@@ -109,8 +111,8 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /listings/:id - Get single listing
-router.get('/:id', async (req: Request, res: Response) => {
+// GET /listings/:id - Get single listing (public)
+router.get('/:id', optionalAuth, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -155,11 +157,11 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// POST /listings - Create new listing
-router.post('/', async (req: Request, res: Response) => {
+// POST /listings - Create new listing (farmer only, use token userId)
+router.post('/', requireAuth, requireFarmer, async (req: Request, res: Response) => {
   try {
+    const farmerId = (req as AuthenticatedRequest).user.userId;
     const {
-      farmerId,
       crop,
       grade,
       price,
@@ -171,10 +173,10 @@ router.post('/', async (req: Request, res: Response) => {
       availableDays = 7,
     } = req.body;
 
-    if (!farmerId || !crop || !grade || !price || !quantity || !county) {
+    if (!crop || !grade || !price || !quantity || !county) {
       return res.status(400).json({
         error: 'Missing required fields',
-        required: ['farmerId', 'crop', 'grade', 'price', 'quantity', 'county'],
+        required: ['crop', 'grade', 'price', 'quantity', 'county'],
       });
     }
 
@@ -230,8 +232,8 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /listings/:id - Update listing
-router.put('/:id', async (req: Request, res: Response) => {
+// PUT /listings/:id - Update listing (farmer owner only)
+router.put('/:id', requireAuth, requireFarmer, requireListingOwnership, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { price, quantity, status, description } = req.body;
@@ -262,8 +264,8 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /listings/:id - Cancel listing
-router.delete('/:id', async (req: Request, res: Response) => {
+// DELETE /listings/:id - Cancel listing (farmer owner only)
+router.delete('/:id', requireAuth, requireFarmer, requireListingOwnership, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
