@@ -40,11 +40,37 @@ coverage/
 ml/data/*
 !ml/data/.gitkeep
 ml/models/*.h5
+ml/models/*.keras
 ml/models/*.tflite
 ml/models/*.pkl
+ml/models/*.onnx
+ml/models/*.pb
+ml/models/saved_model/
 *.weights
 checkpoints/
 mlruns/
+
+# ===== ML Training Artifacts =====
+ml/training/*/logs/
+ml/training/**/logs/
+*.tfevents*
+events.out.*
+
+# ===== Large Dataset Files =====
+*.zip
+*.tar.gz
+*.tar
+*.7z
+*.rar
+*.npz
+*.npy
+*.h5
+*.hdf5
+*.parquet
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*.ipynb_checkpoints
 
 # ===== Mobile =====
 mobile/.expo/
@@ -74,4 +100,28 @@ __pycache__/
 
 # ===== Docker =====
 docker-compose.override.yml
+
+# ===== Database =====
+*.db
+*.sqlite
+*.sqlite3
+prisma/dev.db
+prisma/dev.db-journal
+
+# ===== OS Generated =====
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.Spotlight-V100
+.Trashes
+
+# ===== Backup Files =====
+*.bak
+*.backup
+*~
+
+# ===== Lock Files (optional - uncomment if needed) =====
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
 
