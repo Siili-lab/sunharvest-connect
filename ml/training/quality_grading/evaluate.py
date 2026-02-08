@@ -1,217 +1,291 @@
 """
-Model Evaluation and Bias Testing
+Model Evaluation Script
 
-Evaluates model performance across different segments
-to detect and document potential biases.
+Evaluates the trained quality grading model on test data.
+Generates confusion matrix, classification report, and per-crop analysis.
+
+Also includes bias evaluation framework for NIRU AI Hackathon compliance.
 """
 
 import tensorflow as tf
 import numpy as np
-import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix
-import matplotlib.pyplot as plt
-import seaborn as sns
 import json
 from pathlib import Path
+from datetime import datetime
+from collections import defaultdict
+
+# Try to import optional dependencies
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    HAS_MATPLOTLIB = True
+except ImportError:
+    HAS_MATPLOTLIB = False
+
+try:
+    from sklearn.metrics import confusion_matrix, classification_report
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
+# Configuration
+CONFIG = {
+    'image_size': (224, 224),
+    'batch_size': 32,
+    'class_names': ['premium', 'grade_a', 'grade_b', 'reject'],
+    'data_dir': str(Path(__file__).parent.parent.parent / 'data' / 'unified_quality'),
+    'model_dir': str(Path(__file__).parent.parent.parent / 'models' / 'quality_grading'),
+}
 
 
-class BiasEvaluator:
-    """
-    Evaluates model for fairness across different segments.
-    Required for NIRU AI Hackathon ethical AI compliance.
-    """
+def load_latest_model():
+    """Load the most recent trained model."""
+    model_dir = Path(CONFIG['model_dir'])
 
-    def __init__(self, model_path: str, test_data_path: str):
-        self.model = tf.keras.models.load_model(model_path)
-        self.test_data_path = test_data_path
-        self.class_names = ['premium', 'grade_a', 'grade_b', 'reject']
-        self.results = {}
+    # Try to find latest model
+    h5_files = list(model_dir.glob('final_model_*.h5'))
+    if not h5_files:
+        h5_files = list(model_dir.glob('*.h5'))
 
-    def evaluate_by_region(self, metadata_df: pd.DataFrame):
-        """
-        Evaluate model performance across different regions.
+    if not h5_files:
+        raise FileNotFoundError(f"No model found in {model_dir}")
 
-        Checks if model performs equally well for produce from
-        Central, Eastern, Western Kenya.
-        """
-        regions = metadata_df['region'].unique()
-        region_metrics = {}
+    # Sort by modification time, get newest
+    latest = max(h5_files, key=lambda p: p.stat().st_mtime)
+    print(f"Loading model: {latest}")
 
-        for region in regions:
-            region_data = metadata_df[metadata_df['region'] == region]
-            images = self._load_images(region_data['image_path'].tolist())
-            labels = region_data['label'].tolist()
+    return tf.keras.models.load_model(str(latest)), latest.stem
 
-            predictions = self.model.predict(images)
-            pred_classes = np.argmax(predictions, axis=1)
 
-            accuracy = np.mean(pred_classes == labels)
-            region_metrics[region] = {
-                'accuracy': float(accuracy),
-                'sample_count': len(labels),
-                'report': classification_report(
-                    labels, pred_classes,
-                    target_names=self.class_names,
-                    output_dict=True
-                )
-            }
+def create_test_generator():
+    """Create test data generator."""
+    from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
-        self.results['by_region'] = region_metrics
-        return region_metrics
+    test_datagen = ImageDataGenerator(rescale=1./255)
 
-    def evaluate_by_lighting(self, metadata_df: pd.DataFrame):
-        """
-        Evaluate model performance across lighting conditions.
+    test_dir = Path(CONFIG['data_dir']) / 'test'
+    if not test_dir.exists():
+        raise FileNotFoundError(f"Test data not found at {test_dir}")
 
-        Farmers may take photos in various lighting:
-        - Direct sunlight
-        - Shade
-        - Indoor
-        """
-        lighting_conditions = ['sunlight', 'shade', 'indoor']
-        lighting_metrics = {}
+    test_generator = test_datagen.flow_from_directory(
+        test_dir,
+        target_size=CONFIG['image_size'],
+        batch_size=CONFIG['batch_size'],
+        class_mode='categorical',
+        classes=CONFIG['class_names'],
+        shuffle=False
+    )
 
-        for condition in lighting_conditions:
-            condition_data = metadata_df[metadata_df['lighting'] == condition]
-            if len(condition_data) == 0:
-                continue
+    return test_generator
 
-            images = self._load_images(condition_data['image_path'].tolist())
-            labels = condition_data['label'].tolist()
 
-            predictions = self.model.predict(images)
-            pred_classes = np.argmax(predictions, axis=1)
+def evaluate_model(model, test_gen):
+    """Run full evaluation on test set."""
+    print("\n" + "=" * 60)
+    print("MODEL EVALUATION")
+    print("=" * 60)
 
-            accuracy = np.mean(pred_classes == labels)
-            lighting_metrics[condition] = {
-                'accuracy': float(accuracy),
-                'sample_count': len(labels)
-            }
+    # Basic metrics
+    print("\n1. Computing metrics...")
+    results = model.evaluate(test_gen, verbose=1)
 
-        self.results['by_lighting'] = lighting_metrics
-        return lighting_metrics
+    metrics = {
+        'loss': results[0],
+        'accuracy': results[1],
+    }
+    if len(results) > 2:
+        metrics['precision'] = results[2]
+        metrics['recall'] = results[3]
 
-    def evaluate_by_camera_quality(self, metadata_df: pd.DataFrame):
-        """
-        Evaluate model performance across device camera qualities.
+    print(f"\n   Loss: {metrics['loss']:.4f}")
+    print(f"   Accuracy: {metrics['accuracy']:.4f}")
+    if 'precision' in metrics:
+        print(f"   Precision: {metrics['precision']:.4f}")
+        print(f"   Recall: {metrics['recall']:.4f}")
 
-        Farmers have different phone models with varying camera quality.
-        """
-        quality_levels = ['low', 'medium', 'high']
-        camera_metrics = {}
+    # Get predictions for confusion matrix
+    print("\n2. Generating predictions...")
+    test_gen.reset()
+    predictions = model.predict(test_gen, verbose=1)
+    predicted_classes = np.argmax(predictions, axis=1)
+    true_classes = test_gen.classes
 
-        for quality in quality_levels:
-            quality_data = metadata_df[metadata_df['camera_quality'] == quality]
-            if len(quality_data) == 0:
-                continue
+    return metrics, predicted_classes, true_classes, predictions
 
-            images = self._load_images(quality_data['image_path'].tolist())
-            labels = quality_data['label'].tolist()
 
-            predictions = self.model.predict(images)
-            pred_classes = np.argmax(predictions, axis=1)
+def compute_confusion_matrix(true_classes, predicted_classes, class_names):
+    """Compute and display confusion matrix."""
+    print("\n3. Confusion Matrix:")
 
-            accuracy = np.mean(pred_classes == labels)
-            camera_metrics[quality] = {
-                'accuracy': float(accuracy),
-                'sample_count': len(labels)
-            }
+    if HAS_SKLEARN:
+        cm = confusion_matrix(true_classes, predicted_classes)
+        report = classification_report(true_classes, predicted_classes,
+                                       target_names=class_names, digits=4)
+    else:
+        # Simple confusion matrix without sklearn
+        n_classes = len(class_names)
+        cm = np.zeros((n_classes, n_classes), dtype=int)
+        for t, p in zip(true_classes, predicted_classes):
+            cm[t, p] += 1
+        report = "sklearn not installed - classification report unavailable"
 
-        self.results['by_camera_quality'] = camera_metrics
-        return camera_metrics
+    # Print as text
+    print("\n" + " " * 12 + "  ".join([f"{n:>8}" for n in class_names]))
+    for i, row in enumerate(cm):
+        print(f"{class_names[i]:>10}: " + "  ".join([f"{v:>8}" for v in row]))
 
-    def generate_bias_report(self) -> dict:
-        """
-        Generate comprehensive bias report for documentation.
-        """
-        report = {
-            'model_version': self._get_model_version(),
-            'evaluation_date': pd.Timestamp.now().isoformat(),
-            'metrics': self.results,
-            'bias_flags': self._identify_bias_flags(),
-            'mitigation_recommendations': self._get_recommendations()
+    # Classification report
+    print("\n4. Classification Report:")
+    print(report)
+
+    return cm, report
+
+
+def plot_confusion_matrix(cm, class_names, output_path):
+    """Save confusion matrix as image."""
+    if not HAS_MATPLOTLIB:
+        print("matplotlib not installed - skipping confusion matrix plot")
+        return
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    ax.figure.colorbar(im, ax=ax)
+
+    ax.set(xticks=np.arange(cm.shape[1]),
+           yticks=np.arange(cm.shape[0]),
+           xticklabels=class_names,
+           yticklabels=class_names,
+           title='Confusion Matrix',
+           ylabel='True Grade',
+           xlabel='Predicted Grade')
+
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    # Add text annotations
+    thresh = cm.max() / 2.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, format(cm[i, j], 'd'),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black")
+
+    fig.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    print(f"\nConfusion matrix saved to: {output_path}")
+
+
+def analyze_per_crop_performance(test_gen, predicted_classes, true_classes):
+    """Analyze model performance per crop type."""
+    print("\n5. Per-Crop Analysis:")
+
+    # Extract crop name from filenames
+    filenames = test_gen.filenames
+    crop_results = defaultdict(lambda: {'correct': 0, 'total': 0})
+
+    for i, filename in enumerate(filenames):
+        # Filename format: crop_grade_split_00000.jpg
+        parts = Path(filename).stem.split('_')
+        if len(parts) >= 1:
+            crop = parts[0]
+            crop_results[crop]['total'] += 1
+            if predicted_classes[i] == true_classes[i]:
+                crop_results[crop]['correct'] += 1
+
+    print("\n   Crop          Accuracy    Samples")
+    print("   " + "-" * 40)
+    for crop, stats in sorted(crop_results.items()):
+        acc = stats['correct'] / stats['total'] if stats['total'] > 0 else 0
+        print(f"   {crop:<12}   {acc:>6.1%}      {stats['total']:>5}")
+
+    return dict(crop_results)
+
+
+def analyze_grade_confusion(cm, class_names):
+    """Analyze which grades are most confused."""
+    print("\n6. Grade Confusion Analysis:")
+
+    # Most common misclassifications
+    misclass = []
+    for i in range(len(class_names)):
+        for j in range(len(class_names)):
+            if i != j and cm[i, j] > 0:
+                misclass.append((class_names[i], class_names[j], cm[i, j]))
+
+    misclass.sort(key=lambda x: x[2], reverse=True)
+
+    print("\n   Most common misclassifications:")
+    for true, pred, count in misclass[:5]:
+        print(f"   {true} -> {pred}: {count} samples")
+
+
+def save_evaluation_report(metrics, cm, crop_results, model_name, output_dir):
+    """Save full evaluation report as JSON."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    report = {
+        'timestamp': timestamp,
+        'model': model_name,
+        'metrics': {k: float(v) for k, v in metrics.items()},
+        'confusion_matrix': cm.tolist() if hasattr(cm, 'tolist') else cm,
+        'class_names': CONFIG['class_names'],
+        'per_crop_accuracy': {
+            crop: stats['correct'] / stats['total'] if stats['total'] > 0 else 0
+            for crop, stats in crop_results.items()
+        },
+        'per_crop_samples': {
+            crop: stats['total']
+            for crop, stats in crop_results.items()
         }
+    }
 
-        return report
-
-    def _identify_bias_flags(self) -> list:
-        """
-        Identify potential bias issues where accuracy differs >10%
-        between segments.
-        """
-        flags = []
-
-        for category, metrics in self.results.items():
-            accuracies = [m['accuracy'] for m in metrics.values() if 'accuracy' in m]
-            if len(accuracies) > 1:
-                max_diff = max(accuracies) - min(accuracies)
-                if max_diff > 0.10:  # 10% threshold
-                    flags.append({
-                        'category': category,
-                        'max_difference': float(max_diff),
-                        'severity': 'high' if max_diff > 0.20 else 'medium'
-                    })
-
-        return flags
-
-    def _get_recommendations(self) -> list:
-        """
-        Generate recommendations based on identified biases.
-        """
-        recommendations = []
-
-        for flag in self._identify_bias_flags():
-            if flag['category'] == 'by_region':
-                recommendations.append(
-                    "Collect more training data from underperforming regions"
-                )
-            elif flag['category'] == 'by_lighting':
-                recommendations.append(
-                    "Add more data augmentation for lighting variation"
-                )
-            elif flag['category'] == 'by_camera_quality':
-                recommendations.append(
-                    "Include image degradation in training augmentation"
-                )
-
-        return recommendations
-
-    def _load_images(self, paths: list) -> np.ndarray:
-        """Load and preprocess images."""
-        images = []
-        for path in paths:
-            img = tf.keras.preprocessing.image.load_img(path, target_size=(224, 224))
-            img_array = tf.keras.preprocessing.image.img_to_array(img)
-            img_array = img_array / 255.0
-            images.append(img_array)
-        return np.array(images)
-
-    def _get_model_version(self) -> str:
-        """Get model version from metadata."""
-        return "v1.0.0"
-
-
-def save_report(report: dict, output_path: str):
-    """Save bias report to JSON file."""
-    with open(output_path, 'w') as f:
+    report_path = output_dir / f'evaluation_report_{timestamp}.json'
+    with open(report_path, 'w') as f:
         json.dump(report, f, indent=2)
-    print(f"Bias report saved to {output_path}")
+
+    print(f"\nEvaluation report saved to: {report_path}")
+    return report
+
+
+def main():
+    """Main evaluation entry point."""
+    print("=" * 60)
+    print("QUALITY GRADING MODEL EVALUATION")
+    print("=" * 60)
+
+    # Load model
+    model, model_name = load_latest_model()
+
+    # Create test generator
+    test_gen = create_test_generator()
+    print(f"Test samples: {test_gen.samples}")
+
+    # Run evaluation
+    metrics, predicted_classes, true_classes, predictions = evaluate_model(model, test_gen)
+
+    # Confusion matrix
+    cm, report = compute_confusion_matrix(true_classes, predicted_classes, CONFIG['class_names'])
+
+    # Save confusion matrix plot
+    output_dir = Path(CONFIG['model_dir'])
+    plot_confusion_matrix(cm, CONFIG['class_names'],
+                          output_dir / 'confusion_matrix.png')
+
+    # Per-crop analysis
+    crop_results = analyze_per_crop_performance(test_gen, predicted_classes, true_classes)
+
+    # Grade confusion analysis
+    analyze_grade_confusion(cm, CONFIG['class_names'])
+
+    # Save report
+    save_evaluation_report(metrics, cm, crop_results, model_name, output_dir)
+
+    print("\n" + "=" * 60)
+    print("EVALUATION COMPLETE")
+    print("=" * 60)
 
 
 if __name__ == '__main__':
-    evaluator = BiasEvaluator(
-        model_path='../models/quality_grading/best_model.h5',
-        test_data_path='../data/quality_grading/test'
-    )
-
-    # Load test metadata
-    metadata = pd.read_csv('../data/quality_grading/test_metadata.csv')
-
-    # Run evaluations
-    evaluator.evaluate_by_region(metadata)
-    evaluator.evaluate_by_lighting(metadata)
-    evaluator.evaluate_by_camera_quality(metadata)
-
-    # Generate and save report
-    report = evaluator.generate_bias_report()
-    save_report(report, '../reports/bias_evaluation.json')
+    main()
