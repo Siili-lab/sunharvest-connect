@@ -1,30 +1,30 @@
 export const colors = {
-  // Primary - Harvest Gold
+  // Primary - Growth Green (main brand color used across the app)
   primary: {
-    50: '#FFF8E1',
-    100: '#FFECB3',
-    200: '#FFE082',
-    300: '#FFD54F',
-    400: '#FFCA28',
-    500: '#FFC107', // Main - Use for primary buttons, highlights
-    600: '#FFB300',
-    700: '#FFA000',
-    800: '#FF8F00',
-    900: '#FF6F00',
-  },
-
-  // Secondary - Growth Green
-  secondary: {
     50: '#E8F5E9',
     100: '#C8E6C9',
     200: '#A5D6A7',
     300: '#81C784',
     400: '#66BB6A',
-    500: '#4CAF50', // Main - Use for success, positive actions
+    500: '#4CAF50', // Main - Use for primary buttons, highlights
     600: '#43A047',
     700: '#388E3C',
     800: '#2E7D32',
     900: '#1B5E20',
+  },
+
+  // Accent - Harvest Gold
+  accent: {
+    50: '#FFF8E1',
+    100: '#FFECB3',
+    200: '#FFE082',
+    300: '#FFD54F',
+    400: '#FFCA28',
+    500: '#FFC107', // Main - Use for accent highlights
+    600: '#FFB300',
+    700: '#FFA000',
+    800: '#FF8F00',
+    900: '#FF6F00',
   },
 
   // Neutral
@@ -97,7 +97,7 @@ export const colors = {
     light: '#E0E0E0',
     medium: '#BDBDBD',
     dark: '#757575',
-    focus: '#FFC107',
+    focus: '#2E7D32',
   },
 
   overlay: {

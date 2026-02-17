@@ -84,7 +84,7 @@ export const shadows: Record<string, ViewStyle> = {
  */
 export const coloredShadows = {
   primary: {
-    shadowColor: '#FFC107',
+    shadowColor: '#4CAF50',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
