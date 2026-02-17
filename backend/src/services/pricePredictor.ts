@@ -1,5 +1,5 @@
 import { PrismaClient, CropType, QualityGrade, PriceTrend } from '@prisma/client';
-import { BASE_PRICES, calculateTrends } from './marketDataService';
+import { BASE_PRICES, calculateTrends, fetchRealWeatherData } from './marketDataService';
 
 const prisma = new PrismaClient();
 
@@ -47,6 +47,69 @@ function getQuantityFactor(quantity: number): number {
   return 1.0;
 }
 
+// Weather impact on prices: heavy rain disrupts supply → higher prices
+async function getWeatherFactor(county: string): Promise<{
+  factor: number;
+  reasoning: string | null;
+}> {
+  try {
+    // Check DB for recent weather first
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+    const recentWeather = await prisma.weatherData.findMany({
+      where: { county, date: { gte: twoDaysAgo } },
+      orderBy: { date: 'desc' },
+      take: 3,
+    });
+
+    let rainfall = 0;
+    let temperature = 25;
+
+    if (recentWeather.length > 0) {
+      rainfall = recentWeather.reduce((sum, w) => sum + w.rainfall, 0) / recentWeather.length;
+      temperature = recentWeather.reduce((sum, w) => sum + w.temperature, 0) / recentWeather.length;
+    } else {
+      // Fallback: try live API
+      const live = await fetchRealWeatherData(county);
+      if (live) {
+        rainfall = live.rainfall;
+        temperature = live.temperature;
+      } else {
+        return { factor: 1.0, reasoning: null };
+      }
+    }
+
+    // Heavy rain (>15mm avg) disrupts transport & harvest → prices rise
+    if (rainfall > 15) {
+      return {
+        factor: 1.08,
+        reasoning: `Heavy rainfall (${Math.round(rainfall)}mm) in ${county} is disrupting supply chains`,
+      };
+    }
+
+    // Moderate rain (5-15mm) has mild positive effect on future supply
+    if (rainfall > 5) {
+      return {
+        factor: 0.98,
+        reasoning: `Good rainfall in ${county} supports crop growth`,
+      };
+    }
+
+    // Very hot & dry → crops stressed, lower yield → higher prices
+    if (temperature > 32 && rainfall < 1) {
+      return {
+        factor: 1.05,
+        reasoning: `Hot dry conditions (${Math.round(temperature)}°C) in ${county} may reduce yields`,
+      };
+    }
+
+    return { factor: 1.0, reasoning: null };
+  } catch {
+    return { factor: 1.0, reasoning: null };
+  }
+}
+
 export async function predictPrice(input: PricePredictionInput): Promise<PricePredictionResult> {
   const { cropType, grade, county, quantity } = input;
 
@@ -61,14 +124,17 @@ export async function predictPrice(input: PricePredictionInput): Promise<PricePr
   const countyDemand = COUNTY_DEMAND[county] || COUNTY_DEMAND['default'];
   const quantityFactor = getQuantityFactor(quantity);
 
+  // Weather-based adjustment
+  const weather = await getWeatherFactor(county);
+
   // Trend adjustment
   let trendAdjustment = 1.0;
   if (trends.trend === 'RISING') trendAdjustment = 1.05;
   else if (trends.trend === 'FALLING') trendAdjustment = 0.95;
 
-  // Calculate recommended price
+  // Calculate recommended price (now includes weather factor)
   const recommendedPrice = Math.round(
-    basePrice * gradeMultiplier * countyDemand * quantityFactor * trendAdjustment
+    basePrice * gradeMultiplier * countyDemand * quantityFactor * trendAdjustment * weather.factor
   );
 
   // Price range (±10-15%)
@@ -107,6 +173,10 @@ export async function predictPrice(input: PricePredictionInput): Promise<PricePr
 
   if (quantity > 200) {
     reasoning.push('Bulk quantity may attract wholesale buyers');
+  }
+
+  if (weather.reasoning) {
+    reasoning.push(weather.reasoning);
   }
 
   // Cache the prediction
