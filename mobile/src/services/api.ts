@@ -26,11 +26,34 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Add auth token to requests
-api.interceptors.request.use(async (config) => {
-  const token = await AsyncStorage.getItem('token');
+// Sync token cache — avoids async race conditions with AsyncStorage
+let _authToken: string | null = null;
+
+/** Call this after login/logout to keep the token in sync */
+export function setApiAuthToken(token: string | null) {
+  _authToken = token;
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    delete api.defaults.headers.common['Authorization'];
+  }
+}
+
+// On startup, hydrate token from storage (skip during SSR where window is undefined)
+if (typeof window !== 'undefined') {
+  AsyncStorage.getItem('token').then((token) => {
+    if (token) setApiAuthToken(token);
+  }).catch(() => {});
+}
+
+// Fallback interceptor: if defaults didn't catch it, try AsyncStorage
+api.interceptors.request.use(async (config) => {
+  if (!config.headers.Authorization && !_authToken) {
+    const token = await AsyncStorage.getItem('token');
+    if (token) {
+      _authToken = token;
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   return config;
 });
@@ -157,8 +180,11 @@ export async function createListing(listing: {
   grade: string;
   price: number;
   quantity: number;
-  location: string;
-  imageUri?: string;
+  county: string;
+  description?: string;
+  harvestDate?: string;
+  latitude?: number;
+  longitude?: number;
 }): Promise<Listing> {
   const response = await api.post<{ success: boolean; data: Listing }>('/produce/listings', listing);
   return response.data.data;
@@ -288,8 +314,10 @@ export type Offer = {
   total: number;
   status: 'PENDING' | 'ACCEPTED' | 'PAID' | 'IN_TRANSIT' | 'DELIVERED' | 'COMPLETED' | 'CANCELLED';
   farmer?: string;
+  farmerId?: string;
   farmerPhone?: string;
   buyer?: string;
+  buyerId?: string;
   buyerPhone?: string;
   location?: string;
   images?: string[];
@@ -390,17 +418,18 @@ export type TrustScoreSummary = {
 };
 
 // Get full trust score for a user
+// trust-score is mounted at /api/trust-score (not under /api/v1),
+// so we use a full absolute URL but pass it through `api` to include the auth token.
 export async function getTrustScore(userId: string): Promise<TrustScore> {
-  // Use base URL without /api/v1 prefix since trust-score is mounted at /api/trust-score
-  const baseUrl = API_URL.replace('/api/v1', '');
-  const response = await axios.get<TrustScore>(`${baseUrl}/api/trust-score/${userId}`);
+  const url = API_URL.replace('/api/v1', '/api/trust-score');
+  const response = await api.get<TrustScore>(`${url}/${userId}`, { baseURL: '' });
   return response.data;
 }
 
 // Get quick summary for display on cards
 export async function getTrustScoreSummary(userId: string): Promise<TrustScoreSummary> {
-  const baseUrl = API_URL.replace('/api/v1', '');
-  const response = await axios.get<TrustScoreSummary>(`${baseUrl}/api/trust-score/${userId}/summary`);
+  const url = API_URL.replace('/api/v1', '/api/trust-score');
+  const response = await api.get<TrustScoreSummary>(`${url}/${userId}/summary`, { baseURL: '' });
   return response.data;
 }
 
@@ -455,6 +484,24 @@ export type PaginatedResponse<T> = {
   };
 };
 
+export type PublicProfile = {
+  id: string;
+  name: string;
+  county: string | null;
+  role: string;
+  rating: number | null;
+  totalRatings: number;
+  createdAt: string;
+  isVerified: boolean;
+  activeListings: number;
+  completedDeals: number;
+};
+
+export async function getPublicProfile(userId: string): Promise<PublicProfile> {
+  const response = await api.get<{ success: boolean; data: PublicProfile }>(`/users/${userId}/public-profile`);
+  return response.data.data;
+}
+
 export async function getUserStats(userId: string): Promise<UserStats> {
   const response = await api.get<{ success: boolean; data: UserStats }>(`/users/${userId}/stats`);
   return response.data.data;
@@ -487,6 +534,14 @@ export async function getUserTransactions(userId: string, params?: {
     `/users/${userId}/transactions?${query.toString()}`
   );
   return response.data;
+}
+
+// Delete account - Kenya DPA 2019 compliance (right to erasure)
+export async function deleteAccount(userId: string): Promise<{ message: string }> {
+  const response = await api.delete<{ success: boolean; data: { message: string } }>(
+    `/users/${userId}`
+  );
+  return response.data.data;
 }
 
 // ============================================
@@ -592,6 +647,145 @@ export async function reviewGrade(gradingId: string, data: {
 }): Promise<any> {
   const response = await api.put(`/grading/${gradingId}/review`, data);
   return response.data.data;
+}
+
+// ============================================
+// M-PESA
+// ============================================
+
+export async function checkPaymentStatus(checkoutRequestId: string): Promise<{
+  status: string;
+  paymentRef?: string;
+  paidAt?: string;
+}> {
+  const response = await api.get(`/mpesa/status/${checkoutRequestId}`);
+  return response.data.data;
+}
+
+// ============================================
+// SACCO
+// ============================================
+
+export type SaccoBalance = {
+  savings: number;
+  loanBalance: number;
+  availableLoan: number;
+  interestEarned: number;
+  creditScore: number;
+};
+
+export type SaccoTransaction = {
+  id: string;
+  type: 'contribution' | 'withdrawal' | 'loan' | 'repayment' | 'interest';
+  amount: number;
+  date: string;
+  description: string;
+  status?: string;
+};
+
+export type SaccoGroupInfo = {
+  id: string;
+  name: string;
+  description: string | null;
+  county: string;
+  contribution: number;
+  frequency: string;
+  balance: number;
+  members: number;
+  isMember: boolean;
+  membership: { id: string; role: string; savings: number } | null;
+};
+
+export type SaccoLoanInfo = {
+  id: string;
+  amount: number;
+  amountRepaid: number;
+  balance: number;
+  interestRate: number;
+  termMonths: number;
+  status: string;
+  purpose: string | null;
+  group: string;
+  approvedAt: string | null;
+  dueDate: string | null;
+  createdAt: string;
+};
+
+export async function getSaccoBalance(): Promise<SaccoBalance> {
+  const response = await api.get<{ success: boolean; data: SaccoBalance }>('/sacco/balance');
+  return response.data.data;
+}
+
+export async function getSaccoTransactions(): Promise<SaccoTransaction[]> {
+  const response = await api.get<{ success: boolean; data: SaccoTransaction[] }>('/sacco/transactions');
+  return response.data.data;
+}
+
+export async function getSaccoGroups(): Promise<SaccoGroupInfo[]> {
+  const response = await api.get<{ success: boolean; data: SaccoGroupInfo[] }>('/sacco/groups');
+  return response.data.data;
+}
+
+export async function joinSaccoGroup(groupId: string): Promise<void> {
+  await api.post(`/sacco/groups/${groupId}/join`);
+}
+
+export async function makeSaccoContribution(groupId: string, amount: number): Promise<{ checkoutRequestId: string }> {
+  const response = await api.post('/sacco/contribute', { groupId, amount });
+  return response.data.data;
+}
+
+export async function getSaccoLoans(): Promise<SaccoLoanInfo[]> {
+  const response = await api.get<{ success: boolean; data: SaccoLoanInfo[] }>('/sacco/loans');
+  return response.data.data;
+}
+
+export async function applySaccoLoan(data: {
+  groupId: string;
+  amount: number;
+  purpose: string;
+  termMonths: number;
+}): Promise<SaccoLoanInfo> {
+  const response = await api.post<{ success: boolean; data: SaccoLoanInfo }>('/sacco/loans/apply', data);
+  return response.data.data;
+}
+
+export async function repaySaccoLoan(loanId: string, amount: number): Promise<{ checkoutRequestId: string }> {
+  const response = await api.post(`/sacco/loans/${loanId}/repay`, { amount });
+  return response.data.data;
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+export type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  data: any;
+  isRead: boolean;
+  createdAt: string;
+};
+
+export async function getNotifications(page?: number): Promise<{ notifications: NotificationItem[]; total: number }> {
+  const params = page ? `?page=${page}` : '';
+  const response = await api.get(`/notifications${params}`);
+  return response.data.data;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await api.put(`/notifications/${id}/read`);
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await api.put('/notifications/read-all');
+}
+
+export async function getUnreadCount(): Promise<number> {
+  const response = await api.get('/notifications/unread-count');
+  return response.data.data.count;
 }
 
 export { api };

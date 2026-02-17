@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getTrustScore, getTrustScoreSummary, TrustScore, TrustScoreSummary } from '../services/api';
+import { colors, spacing, radius } from '@/theme';
 
 interface TrustScoreBadgeProps {
   userId: string;
@@ -18,11 +19,11 @@ interface TrustScoreBadgeProps {
 }
 
 const LEVEL_COLORS: Record<TrustScore['level'], { bg: string; text: string; icon: string }> = {
-  New: { bg: '#F5F5F5', text: '#757575', icon: 'person-outline' },
-  Basic: { bg: '#E3F2FD', text: '#1976D2', icon: 'shield-outline' },
-  Trusted: { bg: '#E8F5E9', text: '#388E3C', icon: 'shield-checkmark-outline' },
-  Verified: { bg: '#FFF3E0', text: '#F57C00', icon: 'shield-checkmark' },
-  Elite: { bg: '#F3E5F5', text: '#7B1FA2', icon: 'diamond' },
+  New: { bg: colors.neutral[100], text: colors.neutral[600], icon: 'person-outline' },
+  Basic: { bg: colors.accent[50], text: colors.accent[700], icon: 'shield-outline' },
+  Trusted: { bg: colors.primary[50], text: colors.primary[700], icon: 'shield-checkmark-outline' },
+  Verified: { bg: colors.accent[200], text: colors.accent[900], icon: 'shield-checkmark' },
+  Elite: { bg: colors.accent[100], text: colors.accent[500], icon: 'diamond' },
 };
 
 const BADGE_ICONS: Record<string, string> = {
@@ -54,14 +55,8 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
       const data = await getTrustScoreSummary(userId);
       setSummary(data);
     } catch (error) {
-      // Fallback data
-      setSummary({
-        score: 75,
-        level: 'Trusted',
-        rating: 4.2,
-        totalRatings: 5,
-        isVerified: false,
-      });
+      // No fallback — show nothing rather than fake data
+      setSummary(null);
     } finally {
       setLoading(false);
     }
@@ -74,23 +69,8 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
       const data = await getTrustScore(userId);
       setFullScore(data);
     } catch (error) {
-      // Fallback data
-      setFullScore({
-        score: 75,
-        level: 'Trusted',
-        breakdown: {
-          completionRate: 80,
-          rating: 70,
-          accountAge: 60,
-          verification: 100,
-          responseTime: 75,
-          disputeRate: 90,
-        },
-        badges: ['Active Trader', 'Verified'],
-        totalTransactions: 5,
-        memberSince: new Date().toISOString(),
-        insights: ['Good transaction history', 'Keep up the great work!'],
-      });
+      // No fallback — show nothing rather than fake data
+      setFullScore(null);
     } finally {
       setLoadingDetails(false);
     }
@@ -105,7 +85,7 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
   if (loading) {
     return (
       <View style={[styles.badge, styles[`badge_${size}`]]}>
-        <ActivityIndicator size="small" color="#2E7D32" />
+        <ActivityIndicator size="small" color={colors.primary[800]} />
       </View>
     );
   }
@@ -143,7 +123,7 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
             <View style={styles.badgeLargeInfo}>
               <Text style={[styles.levelLarge, { color: levelStyle.text }]}>{summary.level}</Text>
               <View style={styles.ratingRow}>
-                <Ionicons name="star" size={14} color="#FFC107" />
+                <Ionicons name="star" size={14} color={colors.semantic.warning} />
                 <Text style={styles.ratingText}>
                   {summary.rating.toFixed(1)} ({summary.totalRatings} reviews)
                 </Text>
@@ -151,7 +131,7 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
             </View>
             {summary.isVerified && (
               <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={16} color="#2E7D32" />
+                <Ionicons name="checkmark-circle" size={16} color={colors.primary[800]} />
               </View>
             )}
           </View>
@@ -176,7 +156,7 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
         <Text style={[styles.score, { color: levelStyle.text }]}>{summary.score}</Text>
         <Text style={[styles.level, { color: levelStyle.text }]}>{summary.level}</Text>
         {summary.isVerified && (
-          <Ionicons name="checkmark-circle" size={12} color="#2E7D32" style={styles.verifiedIcon} />
+          <Ionicons name="checkmark-circle" size={12} color={colors.primary[800]} style={styles.verifiedIcon} />
         )}
       </TouchableOpacity>
       {renderModal()}
@@ -196,13 +176,13 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Trust Score</Text>
               <TouchableOpacity onPress={() => setShowModal(false)}>
-                <Ionicons name="close" size={24} color="#666" />
+                <Ionicons name="close" size={24} color={colors.neutral[600]} />
               </TouchableOpacity>
             </View>
 
             {loadingDetails ? (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#2E7D32" />
+                <ActivityIndicator size="large" color={colors.primary[800]} />
                 <Text style={styles.loadingText}>Loading trust profile...</Text>
               </View>
             ) : fullScore ? (
@@ -251,7 +231,7 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
                           <Ionicons
                             name={(BADGE_ICONS[badge] || 'ribbon') as any}
                             size={16}
-                            color="#F57C00"
+                            color={colors.accent[900]}
                           />
                           <Text style={styles.achievementText}>{badge}</Text>
                         </View>
@@ -285,10 +265,10 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
                                 width: `${fullScore.breakdown[item.key as keyof typeof fullScore.breakdown]}%`,
                                 backgroundColor:
                                   fullScore.breakdown[item.key as keyof typeof fullScore.breakdown] >= 70
-                                    ? '#4CAF50'
+                                    ? colors.semantic.success
                                     : fullScore.breakdown[item.key as keyof typeof fullScore.breakdown] >= 40
-                                    ? '#FFC107'
-                                    : '#F44336',
+                                    ? colors.semantic.warning
+                                    : colors.semantic.error,
                               },
                             ]}
                           />
@@ -307,7 +287,7 @@ export default function TrustScoreBadge({ userId, size = 'medium', showDetails =
                     <Text style={styles.sectionTitle}>AI Insights</Text>
                     {fullScore.insights.map((insight, index) => (
                       <View key={index} style={styles.insightItem}>
-                        <Ionicons name="bulb" size={16} color="#F57C00" />
+                        <Ionicons name="bulb" size={16} color={colors.accent[900]} />
                         <Text style={styles.insightText}>{insight}</Text>
                       </View>
                     ))}
@@ -327,9 +307,9 @@ const styles = StyleSheet.create({
   badgeSmall: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
+    paddingHorizontal: spacing[1.5],
+    paddingVertical: spacing[0.5],
+    borderRadius: radius.sm,
     gap: 3,
   },
   scoreSmall: {
@@ -341,10 +321,10 @@ const styles = StyleSheet.create({
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.md,
+    gap: spacing[1],
   },
   badge_small: {},
   badge_medium: {},
@@ -358,27 +338,27 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   verifiedIcon: {
-    marginLeft: 2,
+    marginLeft: spacing[0.5],
   },
 
   // Large badge
   badgeLarge: {
-    padding: 16,
-    borderRadius: 16,
+    padding: spacing[4],
+    borderRadius: radius.lg,
   },
   badgeLargeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing[3],
   },
   scoreCircle: {
     width: 48,
     height: 48,
-    borderRadius: 24,
+    borderRadius: radius.xxl,
     borderWidth: 3,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.neutral[0],
   },
   scoreLarge: {
     fontSize: 18,
@@ -394,62 +374,62 @@ const styles = StyleSheet.create({
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
+    gap: spacing[1],
+    marginTop: spacing[0.5],
   },
   ratingText: {
     fontSize: 12,
-    color: '#666',
+    color: colors.neutral[600],
   },
   verifiedBadge: {
-    backgroundColor: '#E8F5E9',
-    padding: 6,
-    borderRadius: 12,
+    backgroundColor: colors.primary[50],
+    padding: spacing[1.5],
+    borderRadius: radius.md,
   },
   tapHint: {
     fontSize: 11,
-    color: '#9E9E9E',
+    color: colors.neutral[500],
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: spacing[3],
   },
 
   // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.overlay.dark,
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing[6],
     maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: spacing[6],
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   loadingContainer: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: spacing[10],
   },
   loadingText: {
-    marginTop: 12,
-    color: '#666',
+    marginTop: spacing[3],
+    color: colors.neutral[600],
   },
 
   // Score section
   scoreSection: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: spacing[6],
   },
   scoreCircleLarge: {
     width: 100,
@@ -458,8 +438,8 @@ const styles = StyleSheet.create({
     borderWidth: 4,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    marginBottom: 12,
+    backgroundColor: colors.neutral[0],
+    marginBottom: spacing[3],
   },
   scoreValue: {
     fontSize: 32,
@@ -467,15 +447,15 @@ const styles = StyleSheet.create({
   },
   scoreLabel: {
     fontSize: 11,
-    color: '#666',
+    color: colors.neutral[600],
   },
   levelBadgeLarge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: radius.full,
+    gap: spacing[1.5],
   },
   levelText: {
     fontSize: 14,
@@ -485,10 +465,10 @@ const styles = StyleSheet.create({
   // Stats
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
+    backgroundColor: colors.neutral[100],
+    borderRadius: radius.md,
+    padding: spacing[4],
+    marginBottom: spacing[6],
   },
   stat: {
     flex: 1,
@@ -496,75 +476,75 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    backgroundColor: '#E0E0E0',
-    marginHorizontal: 16,
+    backgroundColor: colors.neutral[300],
+    marginHorizontal: spacing[4],
   },
   statValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#333',
+    color: colors.neutral[800],
   },
   statLabel: {
     fontSize: 11,
-    color: '#666',
-    marginTop: 4,
+    color: colors.neutral[600],
+    marginTop: spacing[1],
   },
 
   // Sections
   section: {
-    marginBottom: 24,
+    marginBottom: spacing[6],
   },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    color: colors.neutral[800],
+    marginBottom: spacing[3],
   },
 
   // Badges
   badgesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: spacing[2],
   },
   achievementBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF8E1',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    gap: 6,
+    backgroundColor: colors.accent[50],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1.5],
+    borderRadius: radius.lg,
+    gap: spacing[1.5],
   },
   achievementText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#E65100',
+    color: colors.accent[900],
   },
 
   // Breakdown
   breakdownList: {
-    gap: 12,
+    gap: spacing[3],
   },
   breakdownItem: {},
   breakdownHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    marginBottom: spacing[1],
   },
   breakdownLabel: {
     fontSize: 13,
-    color: '#333',
+    color: colors.neutral[800],
   },
   breakdownWeight: {
     fontSize: 11,
-    color: '#9E9E9E',
+    color: colors.neutral[500],
   },
   breakdownBar: {
     height: 6,
-    backgroundColor: '#E0E0E0',
+    backgroundColor: colors.neutral[300],
     borderRadius: 3,
-    marginBottom: 2,
+    marginBottom: spacing[0.5],
   },
   breakdownFill: {
     height: '100%',
@@ -572,7 +552,7 @@ const styles = StyleSheet.create({
   },
   breakdownValue: {
     fontSize: 11,
-    color: '#666',
+    color: colors.neutral[600],
     textAlign: 'right',
   },
 
@@ -580,16 +560,16 @@ const styles = StyleSheet.create({
   insightItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#FFF8E1',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 8,
-    gap: 10,
+    backgroundColor: colors.accent[50],
+    padding: spacing[3],
+    borderRadius: radius.md,
+    marginBottom: spacing[2],
+    gap: spacing[2.5],
   },
   insightText: {
     flex: 1,
     fontSize: 13,
-    color: '#333',
+    color: colors.neutral[800],
     lineHeight: 18,
   },
 });

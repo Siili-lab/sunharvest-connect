@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { getSuccessPrediction, SuccessPrediction } from '../services/api';
+import { colors, spacing, radius } from '@/theme';
 
 interface Props {
   crop: string;
@@ -38,7 +39,7 @@ export default function SuccessEstimate({ crop, grade, price, quantity, county, 
   if (loading) {
     return compact ? null : (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="small" color="#2E7D32" />
+        <ActivityIndicator size="small" color={colors.primary[800]} />
       </View>
     );
   }
@@ -46,10 +47,10 @@ export default function SuccessEstimate({ crop, grade, price, quantity, county, 
   if (!prediction) return null;
 
   const categoryColors = {
-    fast: '#4CAF50',
-    normal: '#FF9800',
-    slow: '#F44336',
-    unlikely: '#9E9E9E',
+    fast: colors.semantic.success,
+    normal: colors.semantic.warning,
+    slow: colors.semantic.error,
+    unlikely: colors.neutral[500],
   };
 
   const categoryLabels = {
@@ -121,125 +122,125 @@ export default function SuccessEstimate({ crop, grade, price, quantity, county, 
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFF8E1',
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 12,
+    backgroundColor: colors.accent[50],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginVertical: spacing[3],
     borderWidth: 1,
-    borderColor: '#FFE082',
+    borderColor: colors.accent[200],
   },
   loadingContainer: {
-    padding: 16,
+    padding: spacing[4],
     alignItems: 'center',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
+    marginBottom: spacing[3],
+    gap: spacing[2],
   },
   aiBadge: {
-    backgroundColor: '#FF9800',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: colors.semantic.warning,
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[0.5],
+    borderRadius: radius.sm,
   },
   aiIcon: {
-    color: '#fff',
+    color: colors.neutral[0],
     fontSize: 12,
     fontWeight: '700',
   },
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#E65100',
+    color: colors.accent[900],
   },
   mainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: spacing[4],
   },
   daysContainer: {
     alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 12,
-    borderRadius: 12,
+    backgroundColor: colors.neutral[0],
+    padding: spacing[3],
+    borderRadius: radius.lg,
     minWidth: 70,
   },
   daysNumber: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#E65100',
+    color: colors.accent[900],
   },
   daysLabel: {
     fontSize: 12,
-    color: '#666',
+    color: colors.neutral[600],
   },
   detailsContainer: {
     flex: 1,
-    gap: 4,
+    gap: spacing[1],
   },
   categoryBadge: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.lg,
   },
   categoryText: {
-    color: '#fff',
+    color: colors.neutral[0],
     fontSize: 12,
     fontWeight: '600',
   },
   probability: {
     fontSize: 14,
-    color: '#333',
+    color: colors.neutral[800],
     fontWeight: '500',
   },
   range: {
     fontSize: 12,
-    color: '#666',
+    color: colors.neutral[600],
   },
   factorsContainer: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: spacing[3],
+    paddingTop: spacing[3],
     borderTopWidth: 1,
-    borderTopColor: '#FFE082',
+    borderTopColor: colors.accent[200],
   },
   factor: {
     fontSize: 12,
-    color: '#555',
-    marginBottom: 4,
+    color: colors.neutral[600],
+    marginBottom: spacing[1],
   },
   suggestionsContainer: {
-    marginTop: 8,
-    backgroundColor: '#FFF3E0',
-    padding: 10,
-    borderRadius: 8,
+    marginTop: spacing[2],
+    backgroundColor: colors.accent[200],
+    padding: spacing[2.5],
+    borderRadius: radius.sm,
   },
   suggestionsTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#E65100',
-    marginBottom: 4,
+    color: colors.accent[900],
+    marginBottom: spacing[1],
   },
   suggestion: {
     fontSize: 12,
-    color: '#BF360C',
-    marginBottom: 2,
+    color: colors.semantic.error,
+    marginBottom: spacing[0.5],
   },
   // Compact mode
   compactContainer: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: spacing[2],
+    right: spacing[2],
   },
   compactBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[1],
+    borderRadius: radius.sm,
   },
   compactText: {
-    color: '#fff',
+    color: colors.neutral[0],
     fontSize: 11,
     fontWeight: '600',
   },

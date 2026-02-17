@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { getPricePrediction, PricePrediction } from '../services/api';
+import { colors, spacing, radius } from '@/theme';
 
 interface Props {
   crop: string;
@@ -44,7 +46,7 @@ export default function AIPriceSuggestion({ crop, grade, quantity, county, onPri
           <Text style={styles.aiIcon}>AI</Text>
           <Text style={styles.title}>Getting price suggestion...</Text>
         </View>
-        <ActivityIndicator size="small" color="#2E7D32" />
+        <ActivityIndicator size="small" color={colors.primary[800]} />
       </View>
     );
   }
@@ -54,7 +56,7 @@ export default function AIPriceSuggestion({ crop, grade, quantity, county, onPri
   }
 
   const trendIcon = prediction.trend === 'rising' ? '↑' : prediction.trend === 'falling' ? '↓' : '→';
-  const trendColor = prediction.trend === 'rising' ? '#4CAF50' : prediction.trend === 'falling' ? '#F44336' : '#9E9E9E';
+  const trendColor = prediction.trend === 'rising' ? colors.semantic.success : prediction.trend === 'falling' ? colors.semantic.error : colors.neutral[500];
 
   return (
     <View style={styles.container}>
@@ -73,6 +75,17 @@ export default function AIPriceSuggestion({ crop, grade, quantity, county, onPri
         <Text style={styles.price}>{prediction.recommendedPrice}</Text>
         <Text style={styles.unit}>/{prediction.unit}</Text>
       </View>
+
+      {onPriceSelect && (
+        <TouchableOpacity
+          style={styles.usePriceBtn}
+          onPress={() => onPriceSelect(prediction.recommendedPrice)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="checkmark-circle" size={18} color={colors.background.primary} />
+          <Text style={styles.usePriceText}>Use this price</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.rangeRow}>
         <Text style={styles.rangeLabel}>Fair range:</Text>
@@ -111,103 +124,118 @@ export default function AIPriceSuggestion({ crop, grade, quantity, county, onPri
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 12,
+    backgroundColor: colors.primary[50],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginVertical: spacing[3],
     borderWidth: 1,
-    borderColor: '#C8E6C9',
+    borderColor: colors.primary[100],
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
+    marginBottom: spacing[3],
+    gap: spacing[2],
   },
   aiBadge: {
-    backgroundColor: '#2E7D32',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    backgroundColor: colors.primary[800],
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[0.5],
+    borderRadius: radius.sm,
   },
   aiIcon: {
-    color: '#fff',
+    color: colors.neutral[0],
     fontSize: 12,
     fontWeight: '700',
   },
   title: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1B5E20',
+    color: colors.primary[900],
     flex: 1,
   },
   confidence: {
     fontSize: 12,
-    color: '#666',
+    color: colors.neutral[600],
   },
   priceRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    marginBottom: 8,
+    marginBottom: spacing[2],
   },
   currency: {
     fontSize: 16,
-    color: '#333',
-    marginRight: 4,
+    color: colors.neutral[800],
+    marginRight: spacing[1],
   },
   price: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   unit: {
     fontSize: 16,
-    color: '#666',
+    color: colors.neutral[600],
+  },
+  usePriceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.md,
+    paddingVertical: spacing[2.5],
+    gap: spacing[2],
+    marginBottom: spacing[3],
+  },
+  usePriceText: {
+    color: colors.background.primary,
+    fontSize: 14,
+    fontWeight: '600',
   },
   rangeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
+    gap: spacing[2],
+    marginBottom: spacing[3],
   },
   rangeLabel: {
     fontSize: 13,
-    color: '#666',
+    color: colors.neutral[600],
   },
   rangeValue: {
     fontSize: 13,
-    color: '#333',
+    color: colors.neutral[800],
     fontWeight: '500',
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 12,
+    paddingTop: spacing[3],
     borderTopWidth: 1,
-    borderTopColor: '#C8E6C9',
+    borderTopColor: colors.primary[100],
   },
   stat: {
     alignItems: 'center',
   },
   statLabel: {
     fontSize: 11,
-    color: '#666',
-    marginBottom: 2,
+    color: colors.neutral[600],
+    marginBottom: spacing[0.5],
   },
   statValue: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#333',
+    color: colors.neutral[800],
   },
   reasoningContainer: {
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: spacing[3],
+    paddingTop: spacing[3],
     borderTopWidth: 1,
-    borderTopColor: '#C8E6C9',
+    borderTopColor: colors.primary[100],
   },
   reasoning: {
     fontSize: 12,
-    color: '#555',
-    marginBottom: 4,
+    color: colors.neutral[600],
+    marginBottom: spacing[1],
   },
 });
