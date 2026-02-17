@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { PrismaClient, TransactionStatus } from '@prisma/client';
 import { requireAuth, requireBuyer, requireFarmer, requireRole, AuthenticatedRequest } from '../middleware/auth';
 import { requireSelfOrAdmin, requireTransactionParty } from '../middleware/ownership';
+import { initiateSTKPush } from '../services/mpesaService';
+import { notifyUser } from '../services/notificationService';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -61,13 +63,14 @@ router.post('/', requireAuth, requireBuyer, async (req: Request, res: Response) 
       },
     });
 
-    // Update listing status to reserved if full quantity
-    if (quantity >= listing.quantity) {
-      await prisma.produceListing.update({
-        where: { id: listingId },
-        data: { status: 'RESERVED' },
-      });
-    }
+    // Notify farmer about new offer
+    await notifyUser(
+      listing.farmerId,
+      'offer_received',
+      'New Offer Received',
+      `${offer.buyer.name} made an offer of KSh ${offer.agreedPrice}/kg for your ${offer.listing.cropType}`,
+      { transactionId: offer.id, listingId: offer.listingId }
+    );
 
     res.status(201).json({
       success: true,
@@ -213,6 +216,15 @@ router.put('/:id/accept', requireAuth, requireFarmer, async (req: Request, res: 
       data: { status: 'RESERVED' },
     });
 
+    // Notify buyer: offer accepted
+    await notifyUser(
+      offer.buyerId,
+      'offer_accepted',
+      'Offer Accepted',
+      `Your offer for ${offer.listing.cropType} has been accepted. Proceed to payment.`,
+      { transactionId: offer.id }
+    );
+
     res.json({
       success: true,
       message: 'Offer accepted',
@@ -267,6 +279,15 @@ router.put('/:id/decline', requireAuth, requireFarmer, async (req: Request, res:
       });
     }
 
+    // Notify buyer: offer declined
+    await notifyUser(
+      existingOffer.buyerId,
+      'offer_declined',
+      'Offer Declined',
+      `Your offer for ${offer.listing.cropType} was declined by the farmer.`,
+      { transactionId: offer.id }
+    );
+
     res.json({
       success: true,
       message: 'Offer declined',
@@ -277,16 +298,20 @@ router.put('/:id/decline', requireAuth, requireFarmer, async (req: Request, res:
   }
 });
 
-// PUT /offers/:id/pay - Mark as paid (buyer only, verify buyer owns transaction)
+// PUT /offers/:id/pay - Initiate M-Pesa STK push (buyer only, verify buyer owns transaction)
 router.put('/:id/pay', requireAuth, requireBuyer, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const userId = (req as AuthenticatedRequest).user.userId;
-    const { paymentRef, paymentMethod = 'MPESA' } = req.body;
+    const { phone } = req.body;
 
     // Verify buyer owns this transaction
     const existingOffer = await prisma.transaction.findUnique({
       where: { id },
+      include: {
+        listing: { select: { cropType: true, farmerId: true } },
+        buyer: { select: { phone: true } },
+      },
     });
 
     if (!existingOffer) {
@@ -300,23 +325,46 @@ router.put('/:id/pay', requireAuth, requireBuyer, async (req: Request, res: Resp
       });
     }
 
+    if (existingOffer.status !== 'ACCEPTED') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_STATUS', message: `Transaction status is ${existingOffer.status}, expected ACCEPTED` },
+      });
+    }
+
+    const buyerPhone = phone || existingOffer.buyer.phone;
+    const totalAmount = existingOffer.agreedPrice * existingOffer.quantity;
+
+    const stkResponse = await initiateSTKPush({
+      phone: buyerPhone,
+      amount: totalAmount,
+      accountRef: `SH-${id.slice(0, 8)}`,
+      description: `Payment for ${existingOffer.listing.cropType}`,
+    });
+
+    if (stkResponse.ResponseCode !== '0') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'STK_FAILED', message: stkResponse.ResponseDescription },
+      });
+    }
+
     const offer = await prisma.transaction.update({
       where: { id },
       data: {
-        status: 'PAID',
-        paymentMethod,
-        paymentRef,
-        paidAt: new Date(),
+        status: 'PAYMENT_PENDING',
+        paymentMethod: 'MPESA',
+        checkoutRequestId: stkResponse.CheckoutRequestID,
       },
     });
 
     res.json({
       success: true,
-      message: 'Payment confirmed - funds held in escrow',
+      message: 'M-Pesa payment initiated - check your phone',
       offer: {
         id: offer.id,
         status: offer.status,
-        paymentRef: offer.paymentRef,
+        checkoutRequestId: stkResponse.CheckoutRequestID,
       },
     });
   } catch (error) {
@@ -359,6 +407,15 @@ router.put('/:id/deliver', requireAuth, requireRole('FARMER', 'TRANSPORTER'), as
       },
       include: { listing: true },
     });
+
+    // Notify buyer: delivery completed
+    await notifyUser(
+      existingOffer.buyerId,
+      'delivery_completed',
+      'Order Delivered',
+      `Your order of ${offer.listing.cropType} has been delivered. Please confirm receipt.`,
+      { transactionId: offer.id }
+    );
 
     res.json({
       success: true,
@@ -407,6 +464,37 @@ router.put('/:id/complete', requireAuth, requireBuyer, async (req: Request, res:
       where: { id: offer.listingId },
       data: { status: 'SOLD' },
     });
+
+    // If buyer provided a rating, update the farmer's rating
+    if (rating && typeof rating === 'number' && rating >= 1 && rating <= 5) {
+      const farmer = await prisma.user.findUnique({
+        where: { id: offer.listing.farmerId },
+        select: { rating: true, totalRatings: true },
+      });
+
+      if (farmer) {
+        const currentRating = farmer.rating || 0;
+        const currentTotal = farmer.totalRatings || 0;
+        const newAvg = ((currentRating * currentTotal) + rating) / (currentTotal + 1);
+
+        await prisma.user.update({
+          where: { id: offer.listing.farmerId },
+          data: {
+            rating: Math.round(newAvg * 10) / 10,
+            totalRatings: currentTotal + 1,
+          },
+        });
+      }
+    }
+
+    // Notify farmer: transaction complete, payment released
+    await notifyUser(
+      offer.listing.farmerId,
+      'transaction_complete',
+      'Transaction Complete',
+      `Transaction for ${offer.listing.cropType} is complete. Payment has been released to your account.`,
+      { transactionId: offer.id }
+    );
 
     res.json({
       success: true,

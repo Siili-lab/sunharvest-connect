@@ -2,14 +2,30 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { PrismaClient, CropType, QualityGrade, ListingStatus } from '@prisma/client';
 import { gradeProduce } from '../services/mockGradingModel';
+import { gradeProduceML, isMLServerConfigured } from '../services/mlGradingClient';
 import { predictPrice } from '../services/pricePredictor';
 import { mapCropToEnum, mapGradeToEnum } from '../utils/cropMapping';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
 import { requireAuth, requireFarmer, optionalAuth, AuthenticatedRequest } from '../middleware/auth';
+
+const UPLOADS_DIR = path.resolve(__dirname, '../../uploads/grading');
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const router = Router();
 const prisma = new PrismaClient();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB max
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  },
+});
 
 // Crop type mapping from frontend to enum (same as listings.routes.ts)
 const cropTypeMap: Record<string, CropType> = {
@@ -64,8 +80,27 @@ const GRADE_MULTIPLIERS: Record<string, number> = {
   Reject: 0.5,
 };
 
+// Multer error handler wrapper
+function handleUpload(req: Request, res: Response, next: Function) {
+  upload.single('image')(req, res, (err: any) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          success: false,
+          error: { code: 'FILE_TOO_LARGE', message: 'Image must be under 5MB' },
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'UPLOAD_ERROR', message: err.message || 'Upload failed' },
+      });
+    }
+    next();
+  });
+}
+
 // POST /api/v1/produce/grade — requireAuth, use req.user.userId
-router.post('/grade', requireAuth, upload.single('image'), async (req: Request, res: Response) => {
+router.post('/grade', requireAuth, handleUpload, async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -77,9 +112,22 @@ router.post('/grade', requireAuth, upload.single('image'), async (req: Request, 
     const cropType = req.body.cropType || 'tomato';
     const userId = (req as AuthenticatedRequest).user.userId;
 
-    // ML grading (mock — swap in real model later)
+    // ML grading — use real model server if configured, otherwise fall back to mock
     const startTime = Date.now();
-    const prediction = await gradeProduce(req.file.buffer, cropType);
+    let prediction;
+    let usedModel = 'mock-v1.0';
+    if (isMLServerConfigured()) {
+      try {
+        const mlResult = await gradeProduceML(req.file.buffer, cropType);
+        prediction = mlResult;
+        usedModel = mlResult.modelVersion || 'ml-server';
+      } catch (mlErr) {
+        console.warn('[Grading] ML server call failed, falling back to mock:', mlErr);
+        prediction = await gradeProduce(req.file.buffer, cropType);
+      }
+    } else {
+      prediction = await gradeProduce(req.file.buffer, cropType);
+    }
     const inferenceTime = Date.now() - startTime;
 
     // Attempt market-based price prediction; fall back to static prices so
@@ -124,6 +172,12 @@ router.post('/grade', requireAuth, upload.single('image'), async (req: Request, 
         .update(req.file.buffer)
         .digest('hex');
 
+      // Save image to disk
+      const filename = `${imageHash}.jpg`;
+      const filepath = path.join(UPLOADS_DIR, filename);
+      fs.writeFileSync(filepath, req.file.buffer);
+      const imageUrl = `/uploads/grading/${filename}`;
+
       const cropEnum = mapCropToEnum(cropType);
       const gradeEnum = mapGradeToEnum(prediction.grade);
 
@@ -131,12 +185,12 @@ router.post('/grade', requireAuth, upload.single('image'), async (req: Request, 
         data: {
           userId,
           imageHash,
-          imageUrl: `grading/${imageHash}.jpg`, // placeholder — real storage integration later
+          imageUrl,
           cropType: cropEnum,
           grade: gradeEnum,
           confidence: prediction.confidence,
           defects: prediction.defects,
-          modelVersion: 'mock-v1.0',
+          modelVersion: usedModel,
           inferenceTime,
         },
       });
@@ -205,6 +259,8 @@ router.get('/listings', optionalAuth, async (req: Request, res: Response) => {
       if (maxPrice) where.priceAmount.lte = parseFloat(maxPrice as string);
     }
 
+    const take = Math.min(Math.max(parseInt(limit as string) || 50, 1), 100);
+
     const listings = await prisma.produceListing.findMany({
       where,
       include: {
@@ -212,14 +268,13 @@ router.get('/listings', optionalAuth, async (req: Request, res: Response) => {
           select: {
             id: true,
             name: true,
-            phone: true,
             county: true,
             rating: true,
           },
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: parseInt(limit as string),
+      take,
     });
 
     const response = listings.map((listing) => ({
@@ -237,7 +292,6 @@ router.get('/listings', optionalAuth, async (req: Request, res: Response) => {
       quantity: listing.quantity,
       farmer: listing.farmer.name,
       farmerId: listing.farmer.id,
-      phone: listing.farmer.phone,
       location: listing.county,
       images: listing.images,
       harvestDate: listing.harvestDate,
@@ -269,6 +323,8 @@ router.post('/listings', requireAuth, requireFarmer, async (req: Request, res: R
       images,
       harvestDate,
       availableDays = 7,
+      latitude,
+      longitude,
     } = req.body;
 
     const cropName = cropType || crop;
@@ -316,6 +372,8 @@ router.post('/listings', requireAuth, requireFarmer, async (req: Request, res: R
         harvestDate: harvestDate ? new Date(harvestDate) : null,
         availableUntil,
         status: 'ACTIVE',
+        latitude: latitude ? parseFloat(latitude) : null,
+        longitude: longitude ? parseFloat(longitude) : null,
       },
       include: {
         farmer: {

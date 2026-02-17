@@ -12,6 +12,7 @@ const registerSchema = z.object({
   pin: z.string().length(4),
   userType: z.enum(['farmer', 'buyer', 'transporter']),
   location: z.string().optional(),
+  consentGiven: z.boolean().optional(),
 });
 
 const loginSchema = z.object({
@@ -55,13 +56,14 @@ router.post('/register', async (req: Request, res: Response) => {
         pin: hashedPin,
         role: roleMap[data.userType],
         county: data.location,
+        consentGivenAt: data.consentGiven ? new Date() : null,
+        consentVersion: data.consentGiven ? '1.0' : null,
       },
     });
 
     // Generate token
     const token = generateToken({
       userId: user.id,
-      phone: user.phone,
       role: user.role,
     });
 
@@ -135,7 +137,6 @@ router.post('/login', async (req: Request, res: Response) => {
     // Generate token
     const token = generateToken({
       userId: user.id,
-      phone: user.phone,
       role: user.role,
     });
 

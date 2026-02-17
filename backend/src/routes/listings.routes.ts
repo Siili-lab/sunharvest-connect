@@ -68,6 +68,8 @@ router.get('/', optionalAuth, async (req: Request, res: Response) => {
       if (maxPrice) where.priceAmount.lte = parseFloat(maxPrice as string);
     }
 
+    const take = Math.min(Math.max(parseInt(limit as string) || 50, 1), 100);
+
     const listings = await prisma.produceListing.findMany({
       where,
       include: {
@@ -75,14 +77,13 @@ router.get('/', optionalAuth, async (req: Request, res: Response) => {
           select: {
             id: true,
             name: true,
-            phone: true,
             county: true,
             rating: true,
           },
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: parseInt(limit as string),
+      take,
     });
 
     // Transform to frontend format
@@ -96,10 +97,8 @@ router.get('/', optionalAuth, async (req: Request, res: Response) => {
       quantity: listing.quantity,
       farmer: listing.farmer.name,
       farmerId: listing.farmer.id,
-      phone: listing.farmer.phone,
       location: listing.county,
       images: listing.images,
-      aiConfidence: 90 + Math.floor(Math.random() * 8), // Simulated for now
       harvestDate: listing.harvestDate,
       createdAt: listing.createdAt,
     }));
@@ -123,7 +122,6 @@ router.get('/:id', optionalAuth, async (req: Request, res: Response) => {
           select: {
             id: true,
             name: true,
-            phone: true,
             county: true,
             rating: true,
             totalRatings: true,
@@ -238,10 +236,17 @@ router.put('/:id', requireAuth, requireFarmer, requireListingOwnership, async (r
     const { id } = req.params;
     const { price, quantity, status, description } = req.body;
 
+    const ALLOWED_STATUSES: ListingStatus[] = ['ACTIVE', 'SOLD', 'CANCELLED'];
+
     const updateData: any = {};
     if (price !== undefined) updateData.priceAmount = parseFloat(price);
     if (quantity !== undefined) updateData.quantity = parseFloat(quantity);
-    if (status !== undefined) updateData.status = status;
+    if (status !== undefined) {
+      if (!ALLOWED_STATUSES.includes(status as ListingStatus)) {
+        return res.status(400).json({ error: `Invalid status. Allowed: ${ALLOWED_STATUSES.join(', ')}` });
+      }
+      updateData.status = status;
+    }
     if (description !== undefined) updateData.variety = description;
 
     const listing = await prisma.produceListing.update({

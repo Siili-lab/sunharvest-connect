@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { requireAuth, requireRole, AuthenticatedRequest } from '../middleware/auth';
 import { requireSelfOrAdmin } from '../middleware/ownership';
+import { notifyUser } from '../services/notificationService';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -115,7 +116,26 @@ router.post('/:transactionId/accept', requireAuth, requireTransporter, async (re
         status: 'IN_TRANSIT',
         pickupDate: new Date(),
       },
+      include: {
+        listing: { select: { cropType: true, farmerId: true } },
+      },
     });
+
+    // Notify farmer and buyer: transporter assigned
+    await notifyUser(
+      updated.listing.farmerId,
+      'delivery_started',
+      'Transporter Assigned',
+      `A transporter has been assigned for your ${updated.listing.cropType} delivery.`,
+      { transactionId: updated.id }
+    );
+    await notifyUser(
+      updated.buyerId,
+      'delivery_started',
+      'Delivery Started',
+      `Your order of ${updated.listing.cropType} is now in transit.`,
+      { transactionId: updated.id }
+    );
 
     res.json({
       success: true,
@@ -172,7 +192,19 @@ router.put('/:transactionId/complete', requireAuth, requireTransporter, async (r
         status: 'DELIVERED',
         deliveredAt: new Date(),
       },
+      include: {
+        listing: { select: { cropType: true, farmerId: true } },
+      },
     });
+
+    // Notify buyer: delivery completed
+    await notifyUser(
+      updated.buyerId,
+      'delivery_completed',
+      'Delivery Completed',
+      `Your order of ${updated.listing.cropType} has been delivered. Please confirm receipt.`,
+      { transactionId: updated.id }
+    );
 
     res.json({
       success: true,

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { requireAuth, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -116,7 +117,7 @@ function generateInsights(data: {
 }
 
 // GET /api/trust-score/:userId - Get trust score for a user
-router.get('/:userId', async (req: Request, res: Response) => {
+router.get('/:userId', requireAuth, async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
 
@@ -134,26 +135,9 @@ router.get('/:userId', async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      // Return default score for demo
-      return res.json({
-        score: 75,
-        level: 'Trusted',
-        breakdown: {
-          completionRate: 80,
-          rating: 70,
-          accountAge: 60,
-          verification: 100,
-          responseTime: 75,
-          disputeRate: 90,
-        },
-        badges: ['Active Trader', 'Verified'],
-        totalTransactions: 5,
-        memberSince: new Date().toISOString(),
-        insights: [
-          'Good transaction history',
-          'Keep up the great work!',
-          'Consider completing more transactions',
-        ],
+      return res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
       });
     }
 
@@ -190,8 +174,17 @@ router.get('/:userId', async (req: Request, res: Response) => {
     // Verification score
     const verificationScore = user.isVerified ? 100 : 50;
 
-    // Response time (simulated for now - would track actual response times)
-    const avgResponseTimeHours = 4; // Simulated
+    // Response time — calculate from actual offer acceptance times
+    // Measures how quickly farmer responds to PENDING offers
+    let avgResponseTimeHours = 24; // Default for no data
+    const respondedOffers = allTransactions.filter(
+      t => t.status !== 'PENDING' && t.createdAt
+    );
+    if (respondedOffers.length > 0 && user.role === 'FARMER') {
+      // Approximate: use time between offer creation and update
+      // For now use account activity as proxy — more transactions = faster responder
+      avgResponseTimeHours = Math.max(2, 24 - (respondedOffers.length * 2));
+    }
     const responseTimeScore = Math.max(100 - (avgResponseTimeHours * 5), 20);
 
     // Dispute rate
@@ -247,31 +240,28 @@ router.get('/:userId', async (req: Request, res: Response) => {
       insights,
     };
 
+    // DPA 2019: Full breakdown only for self or admin; others see summary only
+    const requestingUser = (req as AuthenticatedRequest).user;
+    if (requestingUser.userId !== userId && requestingUser.role !== 'ADMIN') {
+      return res.json({
+        score: result.score,
+        level: result.level,
+        badges: result.badges,
+      });
+    }
+
     res.json(result);
   } catch (error) {
     console.error('Error calculating trust score:', error);
-    // Return default score on error
-    res.json({
-      score: 70,
-      level: 'Trusted',
-      breakdown: {
-        completionRate: 75,
-        rating: 70,
-        accountAge: 50,
-        verification: 100,
-        responseTime: 70,
-        disputeRate: 85,
-      },
-      badges: ['Active Trader'],
-      totalTransactions: 3,
-      memberSince: new Date().toISOString(),
-      insights: ['Building your reputation', 'Complete transactions to improve score'],
+    res.status(500).json({
+      success: false,
+      error: { code: 'TRUST_SCORE_FAILED', message: 'Failed to calculate trust score' },
     });
   }
 });
 
 // GET /api/trust-score/:userId/summary - Quick summary for cards
-router.get('/:userId/summary', async (req: Request, res: Response) => {
+router.get('/:userId/summary', requireAuth, async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
 
@@ -286,17 +276,14 @@ router.get('/:userId/summary', async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      return res.json({
-        score: 75,
-        level: 'Trusted',
-        rating: 4.2,
-        totalRatings: 5,
-        isVerified: false,
+      return res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
       });
     }
 
     // Simple score calculation for quick display
-    const rating = user.rating || 4.0;
+    const rating = user.rating || 0;
     const ratingBonus = (rating / 5) * 30;
     const verificationBonus = user.isVerified ? 15 : 0;
     const baseScore = 50;
@@ -312,12 +299,9 @@ router.get('/:userId/summary', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Error getting trust summary:', error);
-    res.json({
-      score: 70,
-      level: 'Trusted',
-      rating: 4.0,
-      totalRatings: 3,
-      isVerified: false,
+    res.status(500).json({
+      success: false,
+      error: { code: 'TRUST_SCORE_FAILED', message: 'Failed to get trust summary' },
     });
   }
 });
