@@ -8,12 +8,15 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
+import { PrismaClient } from '@prisma/client';
+import { config } from '../config';
+
+const prisma = new PrismaClient();
 
 // ===== Types =====
 
 export interface JWTPayload {
   userId: string;
-  phone: string;
   role: 'FARMER' | 'BUYER' | 'TRANSPORTER' | 'ADMIN';
   iat?: number;
   exp?: number;
@@ -25,8 +28,8 @@ export interface AuthenticatedRequest extends Request {
 
 // ===== Configuration =====
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const JWT_SECRET = config.jwtSecret;
+const JWT_EXPIRES_IN = config.jwtExpiresIn;
 const SALT_ROUNDS = 10;
 
 // ===== Token Management =====
@@ -81,11 +84,11 @@ export async function verifyPin(pin: string, hash: string): Promise<boolean> {
 /**
  * Require authentication - extracts user from JWT
  */
-export function requireAuth(
+export async function requireAuth(
   req: Request,
   res: Response,
   next: NextFunction
-): void {
+): Promise<void> {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -111,6 +114,26 @@ export function requireAuth(
       },
     });
     return;
+  }
+
+  // Check if account is still active
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { isActive: true },
+    });
+    if (!user || !user.isActive) {
+      res.status(403).json({
+        success: false,
+        error: {
+          code: 'ACCOUNT_DISABLED',
+          message: 'Account is disabled or deleted.',
+        },
+      });
+      return;
+    }
+  } catch {
+    // If DB check fails, allow through (don't break auth on DB issues)
   }
 
   // Attach user to request

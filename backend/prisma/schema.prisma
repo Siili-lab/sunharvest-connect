@@ -26,6 +26,10 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // DPA 2019 consent tracking
+  consentGivenAt DateTime?
+  consentVersion String?
+
   // Location
   county      String?
   subCounty   String?
@@ -38,6 +42,8 @@ model User {
   purchases     Transaction[]    @relation("BuyerTransactions")
   gradingResults GradingResult[]
   smsLogs       SmsLog[]
+  saccoMemberships SaccoMembership[]
+  notifications    Notification[]
 
   // For transporters
   vehicleType     String?
@@ -96,6 +102,8 @@ model ProduceListing {
   // Location (can differ from farmer's location)
   county        String
   subCounty     String?
+  latitude      Float?
+  longitude     Float?
 
   // Availability
   harvestDate   DateTime?
@@ -233,6 +241,7 @@ model Transaction {
   // Payment
   paymentMethod PaymentMethod?
   paymentRef    String?           // M-Pesa confirmation code, etc.
+  checkoutRequestId String?       // M-Pesa STK push checkout request ID
   paidAt        DateTime?
 
   // Delivery
@@ -489,6 +498,114 @@ model ListingSaleData {
   @@index([cropType])
   @@index([sold])
   @@index([daysToSell])
+}
+
+// ============================================
+// SACCO (Savings & Credit Cooperative)
+// ============================================
+
+model SaccoGroup {
+  id                 String                @id @default(uuid())
+  name               String
+  description        String?
+  county             String
+  contributionAmount Float
+  frequency          ContributionFrequency @default(MONTHLY)
+  totalBalance       Float                 @default(0)
+  memberCount        Int                   @default(0)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  memberships        SaccoMembership[]
+  @@index([county])
+}
+
+model SaccoMembership {
+  id            String              @id @default(uuid())
+  userId        String
+  user          User                @relation(fields: [userId], references: [id])
+  groupId       String
+  group         SaccoGroup          @relation(fields: [groupId], references: [id])
+  role          SaccoRole           @default(MEMBER)
+  savings       Float               @default(0)
+  joinedAt      DateTime            @default(now())
+  isActive      Boolean             @default(true)
+  contributions SaccoContribution[]
+  loans         SaccoLoan[]
+  @@unique([userId, groupId])
+  @@index([userId])
+  @@index([groupId])
+}
+
+model SaccoContribution {
+  id            String          @id @default(uuid())
+  membershipId  String
+  membership    SaccoMembership @relation(fields: [membershipId], references: [id])
+  amount        Float
+  paymentRef    String?
+  paymentMethod PaymentMethod   @default(MPESA)
+  status        PaymentStatus   @default(PENDING)
+  createdAt     DateTime        @default(now())
+  @@index([membershipId])
+}
+
+model SaccoLoan {
+  id           String          @id @default(uuid())
+  membershipId String
+  membership   SaccoMembership @relation(fields: [membershipId], references: [id])
+  amount       Float
+  interestRate Float           @default(2.0)
+  termMonths   Int             @default(12)
+  status       LoanStatus      @default(PENDING)
+  purpose      String?
+  amountRepaid Float           @default(0)
+  approvedAt   DateTime?
+  dueDate      DateTime?
+  createdAt    DateTime        @default(now())
+  @@index([membershipId])
+  @@index([status])
+}
+
+enum ContributionFrequency {
+  WEEKLY
+  MONTHLY
+}
+
+enum SaccoRole {
+  MEMBER
+  TREASURER
+  CHAIR
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  ACTIVE
+  REPAID
+  DEFAULTED
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String   // offer_received, payment_confirmed, delivery_started, etc.
+  title     String
+  message   String
+  data      Json?    // { transactionId, listingId, etc. }
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  @@index([userId, isRead])
+  @@index([createdAt])
 }
 
 // ============================================
