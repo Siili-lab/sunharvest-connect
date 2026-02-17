@@ -3,8 +3,6 @@ Model Evaluation Script
 
 Evaluates the trained quality grading model on test data.
 Generates confusion matrix, classification report, and per-crop analysis.
-
-Also includes bias evaluation framework for NIRU AI Hackathon compliance.
 """
 
 import tensorflow as tf
@@ -14,7 +12,6 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
-# Try to import optional dependencies
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -33,7 +30,7 @@ except ImportError:
 CONFIG = {
     'image_size': (224, 224),
     'batch_size': 32,
-    'class_names': ['premium', 'grade_a', 'grade_b', 'reject'],
+    'class_names': ['grade_a', 'grade_b', 'premium', 'reject'],
     'data_dir': str(Path(__file__).parent.parent.parent / 'data' / 'unified_quality'),
     'model_dir': str(Path(__file__).parent.parent.parent / 'models' / 'quality_grading'),
 }
@@ -43,52 +40,67 @@ def load_latest_model():
     """Load the most recent trained model."""
     model_dir = Path(CONFIG['model_dir'])
 
-    # Try to find latest model
-    h5_files = list(model_dir.glob('final_model_*.h5'))
-    if not h5_files:
-        h5_files = list(model_dir.glob('*.h5'))
+    # Try .keras format first (Keras 3), then .h5 (legacy)
+    model_files = list(model_dir.glob('final_model_*.keras'))
+    if not model_files:
+        model_files = list(model_dir.glob('final_model_*.h5'))
+    if not model_files:
+        model_files = list(model_dir.glob('*.keras')) + list(model_dir.glob('*.h5'))
 
-    if not h5_files:
+    if not model_files:
         raise FileNotFoundError(f"No model found in {model_dir}")
 
-    # Sort by modification time, get newest
-    latest = max(h5_files, key=lambda p: p.stat().st_mtime)
+    latest = max(model_files, key=lambda p: p.stat().st_mtime)
     print(f"Loading model: {latest}")
 
     return tf.keras.models.load_model(str(latest)), latest.stem
 
 
-def create_test_generator():
-    """Create test data generator."""
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator
-
-    test_datagen = ImageDataGenerator(rescale=1./255)
-
+def create_test_dataset():
+    """Create test dataset using tf.data."""
     test_dir = Path(CONFIG['data_dir']) / 'test'
     if not test_dir.exists():
         raise FileNotFoundError(f"Test data not found at {test_dir}")
 
-    test_generator = test_datagen.flow_from_directory(
+    test_ds = tf.keras.utils.image_dataset_from_directory(
         test_dir,
-        target_size=CONFIG['image_size'],
+        image_size=CONFIG['image_size'],
         batch_size=CONFIG['batch_size'],
-        class_mode='categorical',
-        classes=CONFIG['class_names'],
-        shuffle=False
+        label_mode='categorical',
+        shuffle=False,
     )
 
-    return test_generator
+    CONFIG['class_names'] = test_ds.class_names
+    return test_ds
 
 
-def evaluate_model(model, test_gen):
+def get_labels_and_predictions(model, test_ds):
+    """Get true labels and predictions from dataset."""
+    all_labels = []
+    all_preds = []
+
+    for images, labels in test_ds:
+        preds = model.predict(images, verbose=0)
+        all_labels.append(labels.numpy())
+        all_preds.append(preds)
+
+    all_labels = np.concatenate(all_labels, axis=0)
+    all_preds = np.concatenate(all_preds, axis=0)
+
+    true_classes = np.argmax(all_labels, axis=1)
+    predicted_classes = np.argmax(all_preds, axis=1)
+
+    return true_classes, predicted_classes, all_preds
+
+
+def evaluate_model(model, test_ds):
     """Run full evaluation on test set."""
     print("\n" + "=" * 60)
     print("MODEL EVALUATION")
     print("=" * 60)
 
-    # Basic metrics
     print("\n1. Computing metrics...")
-    results = model.evaluate(test_gen, verbose=1)
+    results = model.evaluate(test_ds, verbose=1)
 
     metrics = {
         'loss': results[0],
@@ -104,12 +116,8 @@ def evaluate_model(model, test_gen):
         print(f"   Precision: {metrics['precision']:.4f}")
         print(f"   Recall: {metrics['recall']:.4f}")
 
-    # Get predictions for confusion matrix
     print("\n2. Generating predictions...")
-    test_gen.reset()
-    predictions = model.predict(test_gen, verbose=1)
-    predicted_classes = np.argmax(predictions, axis=1)
-    true_classes = test_gen.classes
+    true_classes, predicted_classes, predictions = get_labels_and_predictions(model, test_ds)
 
     return metrics, predicted_classes, true_classes, predictions
 
@@ -123,19 +131,16 @@ def compute_confusion_matrix(true_classes, predicted_classes, class_names):
         report = classification_report(true_classes, predicted_classes,
                                        target_names=class_names, digits=4)
     else:
-        # Simple confusion matrix without sklearn
         n_classes = len(class_names)
         cm = np.zeros((n_classes, n_classes), dtype=int)
         for t, p in zip(true_classes, predicted_classes):
             cm[t, p] += 1
         report = "sklearn not installed - classification report unavailable"
 
-    # Print as text
     print("\n" + " " * 12 + "  ".join([f"{n:>8}" for n in class_names]))
     for i, row in enumerate(cm):
         print(f"{class_names[i]:>10}: " + "  ".join([f"{v:>8}" for v in row]))
 
-    # Classification report
     print("\n4. Classification Report:")
     print(report)
 
@@ -149,7 +154,6 @@ def plot_confusion_matrix(cm, class_names, output_path):
         return
 
     fig, ax = plt.subplots(figsize=(10, 8))
-
     im = ax.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
     ax.figure.colorbar(im, ax=ax)
 
@@ -163,7 +167,6 @@ def plot_confusion_matrix(cm, class_names, output_path):
 
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
-    # Add text annotations
     thresh = cm.max() / 2.
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
@@ -177,17 +180,15 @@ def plot_confusion_matrix(cm, class_names, output_path):
     print(f"\nConfusion matrix saved to: {output_path}")
 
 
-def analyze_per_crop_performance(test_gen, predicted_classes, true_classes):
+def analyze_per_crop_performance(test_ds, predicted_classes, true_classes):
     """Analyze model performance per crop type."""
     print("\n5. Per-Crop Analysis:")
 
-    # Extract crop name from filenames
-    filenames = test_gen.filenames
+    filenames = test_ds.file_paths
     crop_results = defaultdict(lambda: {'correct': 0, 'total': 0})
 
-    for i, filename in enumerate(filenames):
-        # Filename format: crop_grade_split_00000.jpg
-        parts = Path(filename).stem.split('_')
+    for i, filepath in enumerate(filenames):
+        parts = Path(filepath).stem.split('_')
         if len(parts) >= 1:
             crop = parts[0]
             crop_results[crop]['total'] += 1
@@ -207,7 +208,6 @@ def analyze_grade_confusion(cm, class_names):
     """Analyze which grades are most confused."""
     print("\n6. Grade Confusion Analysis:")
 
-    # Most common misclassifications
     misclass = []
     for i in range(len(class_names)):
         for j in range(len(class_names)):
@@ -255,31 +255,21 @@ def main():
     print("QUALITY GRADING MODEL EVALUATION")
     print("=" * 60)
 
-    # Load model
     model, model_name = load_latest_model()
+    test_ds = create_test_dataset()
 
-    # Create test generator
-    test_gen = create_test_generator()
-    print(f"Test samples: {test_gen.samples}")
+    total_samples = sum(1 for _ in Path(CONFIG['data_dir'], 'test').rglob("*") if _.is_file())
+    print(f"Test samples: {total_samples}")
 
-    # Run evaluation
-    metrics, predicted_classes, true_classes, predictions = evaluate_model(model, test_gen)
-
-    # Confusion matrix
+    metrics, predicted_classes, true_classes, predictions = evaluate_model(model, test_ds)
     cm, report = compute_confusion_matrix(true_classes, predicted_classes, CONFIG['class_names'])
 
-    # Save confusion matrix plot
     output_dir = Path(CONFIG['model_dir'])
     plot_confusion_matrix(cm, CONFIG['class_names'],
                           output_dir / 'confusion_matrix.png')
 
-    # Per-crop analysis
-    crop_results = analyze_per_crop_performance(test_gen, predicted_classes, true_classes)
-
-    # Grade confusion analysis
+    crop_results = analyze_per_crop_performance(test_ds, predicted_classes, true_classes)
     analyze_grade_confusion(cm, CONFIG['class_names'])
-
-    # Save report
     save_evaluation_report(metrics, cm, crop_results, model_name, output_dir)
 
     print("\n" + "=" * 60)
