@@ -125,3 +125,11 @@ Desktop.ini
 # yarn.lock
 # pnpm-lock.yaml
 
+# Windows artifacts
+nul
+
+# Runtime uploads
+backend/uploads/
+
+# ML trained models
+ml/models/
