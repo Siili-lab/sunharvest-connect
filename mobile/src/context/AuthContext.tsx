@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setApiAuthToken } from '../services/api';
 
 export type User = {
   id: string;
@@ -31,9 +32,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadUser = async () => {
     try {
-      const userData = await AsyncStorage.getItem('user');
+      const [userData, token] = await Promise.all([
+        AsyncStorage.getItem('user'),
+        AsyncStorage.getItem('token'),
+      ]);
       if (userData) {
         setUser(JSON.parse(userData));
+      }
+      if (token) {
+        setApiAuthToken(token);
       }
     } catch (error) {
       console.log('Error loading user:', error);
@@ -42,12 +49,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const login = async (userData: User, token: string) => {
+    setApiAuthToken(token);
     await AsyncStorage.setItem('user', JSON.stringify(userData));
     await AsyncStorage.setItem('token', token);
     setUser(userData);
   };
 
   const logout = async () => {
+    setApiAuthToken(null);
     await AsyncStorage.removeItem('user');
     await AsyncStorage.removeItem('token');
     setUser(null);

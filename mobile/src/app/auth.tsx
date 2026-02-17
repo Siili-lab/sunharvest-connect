@@ -1,19 +1,22 @@
 import { useState } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { login as apiLogin, register as apiRegister } from '../services/api';
+import { colors, spacing, fontSize, radius, shadows } from '@/theme';
+import { Text } from '../components/primitives/Text';
+import { Input } from '../components/primitives/Input';
+import { Button } from '../components/primitives/Button';
 
 // Demo account credentials - these are REAL accounts in the database
 // All use PIN: 1234
@@ -28,6 +31,7 @@ type AuthMode = 'welcome' | 'login' | 'register';
 export default function AuthScreen() {
   const { login } = useAuth();
   const { t } = useLanguage();
+  const router = useRouter();
   const [mode, setMode] = useState<AuthMode>('welcome');
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
@@ -39,6 +43,9 @@ export default function AuthScreen() {
   const [confirmPin, setConfirmPin] = useState('');
   const [location, setLocation] = useState('');
   const [userType, setUserType] = useState<'farmer' | 'buyer' | 'transporter'>('farmer');
+  const [privacyConsent, setPrivacyConsent] = useState(false);
+  const [pinTouched, setPinTouched] = useState(false);
+  const [confirmPinTouched, setConfirmPinTouched] = useState(false);
 
   // Quick demo login - uses REAL API with seeded test accounts
   const handleDemoLogin = async (type: 'farmer' | 'buyer' | 'transporter') => {
@@ -50,8 +57,8 @@ export default function AuthScreen() {
     } catch (error: any) {
       console.log('Demo login error:', error);
       Alert.alert(
-        'Demo Login Failed',
-        'Make sure the backend is running and database is seeded.\n\nRun: npx ts-node scripts/seedListings.ts'
+        t('demo_login_failed'),
+        t('demo_login_failed_message')
       );
     }
     setDemoLoading(null);
@@ -59,12 +66,12 @@ export default function AuthScreen() {
 
   const handleLogin = async () => {
     if (!phone || !pin) {
-      Alert.alert('Missing Fields', 'Please enter phone and PIN');
+      Alert.alert(t('missing_fields'), t('missing_fields_login'));
       return;
     }
 
     if (pin.length !== 4) {
-      Alert.alert('Invalid PIN', 'PIN must be 4 digits');
+      Alert.alert(t('invalid_pin'), t('invalid_pin_message'));
       return;
     }
 
@@ -74,25 +81,33 @@ export default function AuthScreen() {
       await login(response.user, response.token);
     } catch (error: any) {
       console.log('Login error:', error);
-      const message = error?.response?.data?.error?.message || 'Login failed. Please check your credentials.';
-      Alert.alert('Login Failed', message);
+      const message = error?.response?.data?.error?.message || t('login_failed_default');
+      Alert.alert(t('login_failed'), message);
     }
     setLoading(false);
   };
 
   const handleRegister = async () => {
     if (!name || !phone || !pin || !location) {
-      Alert.alert('Missing Fields', 'Please fill all fields');
+      Alert.alert(t('missing_fields'), t('missing_fields_register'));
       return;
     }
 
     if (pin.length !== 4) {
-      Alert.alert('Invalid PIN', 'PIN must be 4 digits');
+      Alert.alert(t('invalid_pin'), t('invalid_pin_message'));
       return;
     }
 
     if (pin !== confirmPin) {
-      Alert.alert('PIN Mismatch', 'PINs do not match');
+      Alert.alert(t('pin_mismatch'), t('pin_mismatch_message'));
+      return;
+    }
+
+    if (!privacyConsent) {
+      Alert.alert(
+        t('consent_required'),
+        t('consent_required_message')
+      );
       return;
     }
 
@@ -102,8 +117,8 @@ export default function AuthScreen() {
       await login(response.user, response.token);
     } catch (error: any) {
       console.log('Register error:', error);
-      const message = error?.response?.data?.error?.message || 'Registration failed. Please try again.';
-      Alert.alert('Registration Failed', message);
+      const message = error?.response?.data?.error?.message || t('registration_failed_default');
+      Alert.alert(t('registration_failed'), message);
     }
     setLoading(false);
   };
@@ -111,47 +126,77 @@ export default function AuthScreen() {
   if (mode === 'welcome') {
     return (
       <ScrollView style={styles.welcomeContainer} contentContainerStyle={styles.welcomeScrollContent}>
-        <View style={styles.welcomeContent}>
-          <View style={styles.logoContainer}>
-            <Text style={styles.logoIcon}>🌱</Text>
+        {/* Hero Section */}
+        <View style={styles.heroSection}>
+          <View style={styles.heroPattern}>
+            <View style={styles.heroCircle1} />
+            <View style={styles.heroCircle2} />
           </View>
-          <Text style={styles.welcomeTitle}>{t('app_name')}</Text>
-          <Text style={styles.welcomeSubtitle}>
-            AI-powered marketplace for Kenyan farmers. Get fair prices for your produce.
-          </Text>
+          <View style={styles.logoContainer}>
+            <View style={styles.logoInner}>
+              <Ionicons name="leaf" size={32} color={colors.background.primary} />
+            </View>
+          </View>
+          <Text style={styles.heroTitle}>{t('app_name')}</Text>
+          <Text style={styles.heroSubtitle}>{t('app_subtitle')}</Text>
+        </View>
 
-          <View style={styles.features}>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-              <Text style={styles.featureText}>AI quality grading</Text>
+        {/* Features */}
+        <View style={styles.featuresSection}>
+          <View style={styles.featureCard}>
+            <View style={[styles.featureIconWrap, { backgroundColor: colors.primary[50] }]}>
+              <Ionicons name="camera-outline" size={22} color={colors.primary[700]} />
             </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-              <Text style={styles.featureText}>Real-time market prices</Text>
+            <View style={styles.featureTextWrap}>
+              <Text style={styles.featureTitle}>{t('ai_quality_grading')}</Text>
+              <Text style={styles.featureDesc}>Snap a photo, get an instant grade</Text>
             </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#2E7D32" />
-              <Text style={styles.featureText}>Direct buyer connections</Text>
+          </View>
+          <View style={styles.featureCard}>
+            <View style={[styles.featureIconWrap, { backgroundColor: colors.accent[50] }]}>
+              <Ionicons name="trending-up-outline" size={22} color={colors.accent[700]} />
+            </View>
+            <View style={styles.featureTextWrap}>
+              <Text style={styles.featureTitle}>{t('real_time_market_prices')}</Text>
+              <Text style={styles.featureDesc}>AI-powered price intelligence</Text>
+            </View>
+          </View>
+          <View style={styles.featureCard}>
+            <View style={[styles.featureIconWrap, { backgroundColor: colors.semantic.infoLight }]}>
+              <Ionicons name="people-outline" size={22} color={colors.semantic.info} />
+            </View>
+            <View style={styles.featureTextWrap}>
+              <Text style={styles.featureTitle}>{t('direct_buyer_connections')}</Text>
+              <Text style={styles.featureDesc}>No middlemen, better prices</Text>
             </View>
           </View>
         </View>
 
+        {/* Actions */}
         <View style={styles.welcomeActions}>
           <TouchableOpacity
-            style={styles.primaryButton}
+            style={styles.getStartedBtn}
             onPress={() => setMode('register')}
-            activeOpacity={0.8}
+            activeOpacity={0.85}
+            accessibilityLabel={t('get_started')}
+            accessibilityRole="button"
           >
-            <Text style={styles.primaryButtonText}>Get Started</Text>
+            <Text style={styles.getStartedText}>{t('get_started')}</Text>
+            <View style={styles.getStartedArrow}>
+              <Ionicons name="arrow-forward" size={18} color={colors.primary[800]} />
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.textButton}
+            style={styles.loginLink}
             onPress={() => setMode('login')}
-            activeOpacity={0.8}
+            activeOpacity={0.7}
+            accessibilityLabel={t('have_account')}
+            accessibilityRole="button"
           >
-            <Text style={styles.textButtonText}>
-              Already have an account? <Text style={styles.textButtonLink}>Sign In</Text>
+            <Text style={styles.loginLinkText}>
+              {t('have_account')}{' '}
+              <Text style={styles.loginLinkBold}>{t('login')}</Text>
             </Text>
           </TouchableOpacity>
 
@@ -159,48 +204,33 @@ export default function AuthScreen() {
           <View style={styles.demoSection}>
             <View style={styles.dividerContainer}>
               <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>Quick Demo</Text>
+              <Text style={styles.dividerText}>{t('quick_demo')}</Text>
               <View style={styles.dividerLine} />
             </View>
 
-            <Text style={styles.demoHint}>Try the app instantly as:</Text>
-
             <View style={styles.demoButtons}>
-              <TouchableOpacity
-                style={[styles.demoButton, demoLoading === 'farmer' && styles.demoButtonLoading]}
-                onPress={() => handleDemoLogin('farmer')}
-                activeOpacity={0.8}
-                disabled={!!demoLoading}
-              >
-                <Ionicons name="leaf" size={20} color="#2E7D32" />
-                <Text style={styles.demoButtonText}>
-                  {demoLoading === 'farmer' ? '...' : t('farmer')}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.demoButton, demoLoading === 'buyer' && styles.demoButtonLoading]}
-                onPress={() => handleDemoLogin('buyer')}
-                activeOpacity={0.8}
-                disabled={!!demoLoading}
-              >
-                <Ionicons name="cart" size={20} color="#1976D2" />
-                <Text style={styles.demoButtonText}>
-                  {demoLoading === 'buyer' ? '...' : t('buyer')}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.demoButton, demoLoading === 'transporter' && styles.demoButtonLoading]}
-                onPress={() => handleDemoLogin('transporter')}
-                activeOpacity={0.8}
-                disabled={!!demoLoading}
-              >
-                <Ionicons name="car" size={20} color="#F57C00" />
-                <Text style={styles.demoButtonText}>
-                  {demoLoading === 'transporter' ? '...' : t('transporter')}
-                </Text>
-              </TouchableOpacity>
+              {([
+                { type: 'farmer' as const, icon: 'leaf' as const, color: colors.primary[700], bg: colors.primary[50] },
+                { type: 'buyer' as const, icon: 'cart' as const, color: colors.accent[700], bg: colors.accent[50] },
+                { type: 'transporter' as const, icon: 'car' as const, color: colors.semantic.info, bg: colors.semantic.infoLight },
+              ]).map(({ type, icon, color, bg }) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[styles.demoButton, demoLoading === type && styles.demoButtonLoading]}
+                  onPress={() => handleDemoLogin(type)}
+                  activeOpacity={0.8}
+                  disabled={!!demoLoading}
+                  accessibilityLabel={`${t('demo_login_as').replace('%1', t(type))}`}
+                  accessibilityRole="button"
+                >
+                  <View style={[styles.demoIconWrap, { backgroundColor: bg }]}>
+                    <Ionicons name={icon} size={18} color={color} />
+                  </View>
+                  <Text style={styles.demoButtonText}>
+                    {demoLoading === type ? '...' : t(type)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
         </View>
@@ -214,91 +244,83 @@ export default function AuthScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.authContent} showsVerticalScrollIndicator={false}>
-        <TouchableOpacity style={styles.backButton} onPress={() => setMode('welcome')}>
-          <Text style={styles.backButtonText}>{'<'} Back</Text>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => setMode('welcome')}
+          accessibilityLabel={t('back')}
+          accessibilityRole="button"
+        >
+          <View style={styles.backButtonInner}>
+            <Ionicons name="arrow-back" size={20} color={colors.primary[800]} />
+            <Text variant="label" style={styles.backButtonText}>{t('back')}</Text>
+          </View>
         </TouchableOpacity>
 
         <View style={styles.authHeader}>
-          <Text style={styles.authTitle}>
+          <Text variant="heading1" style={styles.authTitle}>
             {mode === 'login' ? t('welcome') : t('register')}
           </Text>
-          <Text style={styles.authSubtitle}>
+          <Text variant="bodySmall" color="secondary" style={styles.authSubtitle}>
             {mode === 'login'
-              ? 'Sign in to access your account'
-              : 'Join thousands of farmers getting fair prices'}
+              ? t('sign_in_subtitle')
+              : t('register_subtitle')}
           </Text>
         </View>
 
         <View style={styles.form}>
           {mode === 'register' && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>{t('name')}</Text>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder={t('enter_name')}
-                placeholderTextColor="#9E9E9E"
-                autoCapitalize="words"
-              />
-            </View>
+            <Input
+              label={t('name')}
+              value={name}
+              onChangeText={setName}
+              placeholder={t('enter_name')}
+              autoCapitalize="words"
+            />
           )}
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>{t('phone_number')}</Text>
-            <TextInput
-              style={styles.input}
-              value={phone}
-              onChangeText={setPhone}
-              placeholder="+254 7XX XXX XXX"
-              placeholderTextColor="#9E9E9E"
-              keyboardType="phone-pad"
-            />
-          </View>
+          <Input
+            label={t('phone_number')}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="+254 7XX XXX XXX"
+            keyboardType="phone-pad"
+          />
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>{t('pin')}</Text>
-            <TextInput
-              style={styles.input}
-              value={pin}
-              onChangeText={(text) => setPin(text.replace(/[^0-9]/g, '').slice(0, 4))}
-              placeholder={t('enter_pin')}
-              placeholderTextColor="#9E9E9E"
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={4}
-            />
-          </View>
+          <Input
+            label={t('pin')}
+            value={pin}
+            onChangeText={(text) => { setPin(text.replace(/[^0-9]/g, '').slice(0, 4)); setPinTouched(true); }}
+            placeholder={t('enter_pin')}
+            keyboardType="number-pad"
+            secureTextEntry
+            maxLength={4}
+            error={pinTouched && pin.length > 0 && pin.length < 4}
+            errorText={pinTouched && pin.length > 0 && pin.length < 4 ? t('invalid_pin_message') : undefined}
+          />
 
           {mode === 'register' && (
             <>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('confirm_pin')}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={confirmPin}
-                  onChangeText={(text) => setConfirmPin(text.replace(/[^0-9]/g, '').slice(0, 4))}
-                  placeholder={t('confirm_pin')}
-                  placeholderTextColor="#9E9E9E"
-                  keyboardType="number-pad"
-                  secureTextEntry
-                  maxLength={4}
-                />
-              </View>
+              <Input
+                label={t('confirm_pin')}
+                value={confirmPin}
+                onChangeText={(text) => { setConfirmPin(text.replace(/[^0-9]/g, '').slice(0, 4)); setConfirmPinTouched(true); }}
+                placeholder={t('confirm_pin')}
+                keyboardType="number-pad"
+                secureTextEntry
+                maxLength={4}
+                error={confirmPinTouched && confirmPin.length === 4 && confirmPin !== pin}
+                errorText={confirmPinTouched && confirmPin.length === 4 && confirmPin !== pin ? t('pin_mismatch_message') : undefined}
+              />
+
+              <Input
+                label={t('location')}
+                value={location}
+                onChangeText={setLocation}
+                placeholder={t('select_county')}
+              />
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('location')}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={location}
-                  onChangeText={setLocation}
-                  placeholder={t('select_county')}
-                  placeholderTextColor="#9E9E9E"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('user_type')}</Text>
+                <Text variant="label" style={styles.inputLabel}>{t('user_type')}</Text>
                 <View style={styles.userTypeSelector}>
                   {(['farmer', 'buyer', 'transporter'] as const).map((type) => (
                     <TouchableOpacity
@@ -308,12 +330,14 @@ export default function AuthScreen() {
                         userType === type && styles.userTypeOptionActive,
                       ]}
                       onPress={() => setUserType(type)}
+                      accessibilityLabel={t(type)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: userType === type }}
                     >
                       <Text
-                        style={[
-                          styles.userTypeOptionText,
-                          userType === type && styles.userTypeOptionTextActive,
-                        ]}
+                        variant="label"
+                        color={userType === type ? 'primary' : 'secondary'}
+                        style={userType === type ? styles.userTypeOptionTextActive : undefined}
                       >
                         {t(type)}
                       </Text>
@@ -321,31 +345,67 @@ export default function AuthScreen() {
                   ))}
                 </View>
               </View>
+
+              {/* Privacy Consent Checkbox - Kenya DPA 2019 Compliance */}
+              <TouchableOpacity
+                style={styles.consentContainer}
+                onPress={() => setPrivacyConsent(!privacyConsent)}
+                activeOpacity={0.7}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: privacyConsent }}
+                accessibilityLabel={`${t('consent_agree')} ${t('consent_privacy_policy')} ${t('consent_and')} ${t('consent_terms')}`}
+              >
+                <View style={[styles.checkbox, privacyConsent && styles.checkboxChecked]}>
+                  {privacyConsent && (
+                    <Ionicons name="checkmark" size={16} color={colors.background.primary} />
+                  )}
+                </View>
+                <Text variant="caption" color="secondary" style={styles.consentText}>
+                  {t('consent_agree')}{' '}
+                  <Text
+                    variant="caption"
+                    color="link"
+                    underline
+                    onPress={() => router.push('/privacy')}
+                  >
+                    {t('consent_privacy_policy')}
+                  </Text>
+                  {' '}{t('consent_and')}{' '}
+                  <Text
+                    variant="caption"
+                    color="link"
+                    underline
+                    onPress={() => router.push('/privacy')}
+                  >
+                    {t('consent_terms')}
+                  </Text>
+                  {' '}{t('consent_dpa')}
+                </Text>
+              </TouchableOpacity>
             </>
           )}
 
-          <TouchableOpacity
-            style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+          <Button
+            variant="primary"
+            size="large"
+            fullWidth
             onPress={mode === 'login' ? handleLogin : handleRegister}
-            activeOpacity={0.8}
+            loading={loading}
             disabled={loading}
+            style={styles.submitButton}
           >
-            <Text style={styles.submitButtonText}>
-              {loading ? t('loading') : mode === 'login' ? t('login') : t('register')}
-            </Text>
-          </TouchableOpacity>
+            {mode === 'login' ? t('login') : t('register')}
+          </Button>
 
-          <TouchableOpacity
-            style={styles.switchMode}
+          <Button
+            variant="ghost"
             onPress={() => setMode(mode === 'login' ? 'register' : 'login')}
+            style={styles.switchMode}
           >
-            <Text style={styles.switchModeText}>
-              {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-              <Text style={styles.switchModeLink}>
-                {mode === 'login' ? t('register') : t('login')}
-              </Text>
-            </Text>
-          </TouchableOpacity>
+            {mode === 'login'
+              ? `${t('no_account')} ${t('register')}`
+              : `${t('have_account')} ${t('login')}`}
+          </Button>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -355,257 +415,307 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background.primary,
   },
   welcomeContainer: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background.primary,
   },
   welcomeScrollContent: {
     flexGrow: 1,
-    padding: 24,
   },
-  welcomeContent: {
-    flex: 1,
-    justifyContent: 'center',
+  // ── Hero ──
+  heroSection: {
+    backgroundColor: colors.primary[800],
+    paddingTop: spacing[14],
+    paddingBottom: spacing[10],
+    paddingHorizontal: spacing[6],
     alignItems: 'center',
-    minHeight: 300,
+    overflow: 'hidden',
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+  },
+  heroPattern: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  heroCircle1: {
+    position: 'absolute',
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    top: -40,
+    right: -60,
+  },
+  heroCircle2: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    bottom: -20,
+    left: -30,
   },
   logoContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#E8F5E9',
+    marginBottom: spacing[5],
+  },
+  logoInner: {
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  logoIcon: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#2E7D32',
+  heroTitle: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: colors.background.primary,
+    letterSpacing: -0.5,
+    marginBottom: spacing[2],
   },
-  welcomeTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1B5E20',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  welcomeSubtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 24,
-    paddingHorizontal: 20,
-    marginBottom: 32,
-  },
-  features: {
-    alignSelf: 'stretch',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    gap: 16,
-  },
-  featureItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  featureCheck: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#E8F5E9',
-    color: '#2E7D32',
-    textAlign: 'center',
-    lineHeight: 24,
-    fontWeight: '700',
-    fontSize: 14,
-  },
-  featureText: {
+  heroSubtitle: {
     fontSize: 15,
-    color: '#333',
-  },
-  welcomeActions: {
-    gap: 16,
-    paddingBottom: 16,
-  },
-  primaryButton: {
-    backgroundColor: '#2E7D32',
-    paddingVertical: 18,
-    borderRadius: 14,
-    alignItems: 'center',
-    elevation: 4,
-  },
-  primaryButtonText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  textButton: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  textButtonText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  textButtonLink: {
-    color: '#2E7D32',
-    fontWeight: '600',
-  },
-  authContent: {
-    flexGrow: 1,
-    padding: 24,
-  },
-  backButton: {
-    marginBottom: 24,
-  },
-  backButtonText: {
-    fontSize: 15,
-    color: '#2E7D32',
-    fontWeight: '600',
-  },
-  authHeader: {
-    marginBottom: 32,
-  },
-  authTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1B5E20',
-    marginBottom: 8,
-  },
-  authSubtitle: {
-    fontSize: 15,
-    color: '#666',
+    color: colors.primary[200],
+    textAlign: 'center',
     lineHeight: 22,
+    paddingHorizontal: spacing[4],
   },
-  form: {
-    gap: 16,
+  // ── Features ──
+  featuresSection: {
+    paddingHorizontal: spacing[5],
+    marginTop: -spacing[6],
+    gap: spacing[2.5],
   },
-  inputGroup: {
-    gap: 6,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  input: {
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#E0E0E0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333',
-  },
-  userTypeSelector: {
+  featureCard: {
     flexDirection: 'row',
-    gap: 8,
-  },
-  userTypeOption: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    borderWidth: 1.5,
-    borderColor: '#E0E0E0',
     alignItems: 'center',
+    backgroundColor: colors.background.primary,
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    ...shadows.sm,
+    borderWidth: 1,
+    borderColor: colors.neutral[100],
   },
-  userTypeOptionActive: {
-    backgroundColor: '#E8F5E9',
-    borderColor: '#2E7D32',
-  },
-  userTypeOptionText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  userTypeOptionTextActive: {
-    color: '#2E7D32',
-  },
-  submitButton: {
-    backgroundColor: '#2E7D32',
-    paddingVertical: 18,
+  featureIconWrap: {
+    width: 46,
+    height: 46,
     borderRadius: 14,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
-    elevation: 4,
+    marginRight: spacing[3.5],
   },
-  submitButtonDisabled: {
-    opacity: 0.7,
+  featureTextWrap: {
+    flex: 1,
   },
-  submitButtonText: {
+  featureTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text.primary,
+  },
+  featureDesc: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  // ── Actions ──
+  welcomeActions: {
+    paddingHorizontal: spacing[5],
+    paddingTop: spacing[6],
+    paddingBottom: spacing[6],
+  },
+  getStartedBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.xl,
+    paddingVertical: spacing[4],
+    paddingHorizontal: spacing[6],
+    ...shadows.md,
+  },
+  getStartedText: {
     fontSize: 17,
-    fontWeight: '600',
-    color: '#fff',
+    fontWeight: '700',
+    color: colors.background.primary,
+    flex: 1,
+    textAlign: 'center',
   },
-  switchMode: {
+  getStartedArrow: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 8,
   },
-  switchModeText: {
+  loginLink: {
+    alignSelf: 'center',
+    marginTop: spacing[4],
+    paddingVertical: spacing[2],
+  },
+  loginLinkText: {
     fontSize: 14,
-    color: '#666',
+    color: colors.text.secondary,
   },
-  switchModeLink: {
-    color: '#2E7D32',
-    fontWeight: '600',
+  loginLinkBold: {
+    color: colors.primary[800],
+    fontWeight: '700',
   },
-  // Demo section styles
+  // ── Demo ──
   demoSection: {
-    marginTop: 24,
-    paddingTop: 8,
+    marginTop: spacing[6],
   },
   dividerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: spacing[4],
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#E0E0E0',
+    backgroundColor: colors.neutral[200],
   },
   dividerText: {
-    paddingHorizontal: 12,
-    fontSize: 12,
-    color: '#9E9E9E',
+    paddingHorizontal: spacing[3],
+    fontSize: 11,
     fontWeight: '600',
+    color: colors.text.secondary,
+    letterSpacing: 0.8,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  demoHint: {
-    textAlign: 'center',
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 12,
   },
   demoButtons: {
     flexDirection: 'row',
-    gap: 10,
+    gap: spacing[2.5],
   },
   demoButton: {
     flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: colors.background.primary,
+    paddingVertical: spacing[3.5],
+    borderRadius: radius.xl,
     borderWidth: 1.5,
-    borderColor: '#E0E0E0',
-    gap: 6,
+    borderColor: colors.neutral[200],
+    gap: spacing[2],
+    ...shadows.xs,
   },
-  demoButtonLoading: {
-    opacity: 0.6,
+  demoIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   demoButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#333',
+    color: colors.text.primary,
+    textTransform: 'capitalize',
+  },
+  demoButtonLoading: {
+    opacity: 0.5,
+  },
+  authContent: {
+    flexGrow: 1,
+    padding: spacing[6],
+    backgroundColor: colors.background.primary,
+  },
+  backButton: {
+    marginBottom: spacing[4],
+  },
+  backButtonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1.5],
+    backgroundColor: colors.neutral[100],
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: radius.full,
+  },
+  backButtonText: {
+    color: colors.primary[800],
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  authHeader: {
+    marginBottom: spacing[6],
+  },
+  authTitle: {
+    color: colors.primary[900],
+    marginBottom: spacing[2],
+  },
+  authSubtitle: {
+    lineHeight: 22,
+  },
+  form: {
+    gap: spacing[4],
+  },
+  inputGroup: {
+    gap: spacing[1.5],
+  },
+  inputLabel: {
+    marginBottom: spacing[1],
+  },
+  userTypeSelector: {
+    flexDirection: 'row',
+    gap: spacing[2],
+  },
+  userTypeOption: {
+    flex: 1,
+    paddingVertical: spacing[3],
+    borderRadius: radius.lg,
+    backgroundColor: colors.background.primary,
+    borderWidth: 1.5,
+    borderColor: colors.border.light,
+    alignItems: 'center',
+  },
+  userTypeOptionActive: {
+    backgroundColor: colors.primary[50],
+    borderColor: colors.primary[800],
+  },
+  userTypeOptionTextActive: {
+    color: colors.primary[800],
+  },
+  submitButton: {
+    borderRadius: radius.xl,
+    marginTop: spacing[2],
+    elevation: 4,
+  },
+  switchMode: {
+    marginTop: spacing[2],
+  },
+  // Privacy consent checkbox styles
+  consentContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing[2],
+    paddingVertical: spacing[2],
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.neutral[500],
+    marginRight: spacing[3],
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary[800],
+    borderColor: colors.primary[800],
+  },
+  consentText: {
+    flex: 1,
+    lineHeight: 20,
   },
 });

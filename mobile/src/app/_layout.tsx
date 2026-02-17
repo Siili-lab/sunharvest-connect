@@ -1,18 +1,48 @@
 import { Tabs } from 'expo-router';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+
+// Polyfill Alert.alert for web — uses window.confirm/alert instead
+if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  const originalAlert = Alert.alert;
+  Alert.alert = (title: string, message?: string, buttons?: any[]) => {
+    // Find destructive/default action button
+    const cancelBtn = buttons?.find(b => b.style === 'cancel');
+    const actionBtn = buttons?.find(b => b.style !== 'cancel') || buttons?.[0];
+
+    if (buttons && buttons.length > 1 && cancelBtn) {
+      // Confirmation dialog
+      if (window.confirm(`${title}\n${message || ''}`)) {
+        actionBtn?.onPress?.();
+      } else {
+        cancelBtn?.onPress?.();
+      }
+    } else if (buttons && buttons.length === 1) {
+      // Simple alert with one button
+      window.alert(`${title}\n${message || ''}`);
+      buttons[0]?.onPress?.();
+    } else {
+      // No buttons — just show alert
+      window.alert(`${title}\n${message || ''}`);
+    }
+  };
+}
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { LanguageProvider, useLanguage } from '../context/LanguageContext';
+import { ToastProvider } from '../context/ToastContext';
+import { NotificationProvider, useNotifications } from '../context/NotificationContext';
+import { ThemeProvider, colors, fontSize } from '@/theme';
 import AuthScreen from './auth';
 
 function MainLayout() {
   const { isAuthenticated, isLoading, user } = useAuth();
   const { t } = useLanguage();
+  const { unreadCount } = useNotifications();
 
   if (isLoading) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#2E7D32" />
+        <ActivityIndicator size="large" color={colors.primary[800]} />
       </View>
     );
   }
@@ -28,26 +58,28 @@ function MainLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: '#2E7D32',
-        tabBarInactiveTintColor: '#9E9E9E',
+        tabBarActiveTintColor: colors.primary[800],
+        tabBarInactiveTintColor: colors.neutral[500],
         tabBarStyle: {
-          backgroundColor: '#fff',
-          borderTopColor: '#E8F5E9',
+          backgroundColor: colors.background.primary,
+          borderTopColor: colors.primary[50],
           paddingTop: 4,
           height: 60,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: fontSize.xs,
           fontWeight: '600',
           marginBottom: 6,
         },
         headerShown: true,
-        headerStyle: { backgroundColor: '#2E7D32' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: colors.primary[800] },
+        headerTintColor: colors.text.inverse,
         headerTitleStyle: { fontWeight: '600' },
       }}
     >
-      {/* Dashboard - All roles */}
+      {/* === 4 VISIBLE TABS === */}
+
+      {/* Tab 1: Home - All roles */}
       <Tabs.Screen
         name="index"
         options={{
@@ -56,23 +88,11 @@ function MainLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
+          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
         }}
       />
 
-      {/* Sell - Farmers only */}
-      <Tabs.Screen
-        name="sell"
-        options={{
-          title: t('sell_produce'),
-          tabBarLabel: t('sell'),
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle" size={size} color={color} />
-          ),
-          href: isFarmer ? '/sell' : null,
-        }}
-      />
-
-      {/* Market - Farmers and Buyers */}
+      {/* Tab 2: Market (farmers/buyers) or Jobs (transporters) */}
       <Tabs.Screen
         name="market"
         options={{
@@ -84,8 +104,6 @@ function MainLayout() {
           href: (isFarmer || isBuyer) ? '/market' : null,
         }}
       />
-
-      {/* Deliveries - Transporters only */}
       <Tabs.Screen
         name="deliveries"
         options={{
@@ -98,7 +116,7 @@ function MainLayout() {
         }}
       />
 
-      {/* Orders - Farmers and Buyers */}
+      {/* Tab 3: Orders - All roles */}
       <Tabs.Screen
         name="orders"
         options={{
@@ -107,29 +125,10 @@ function MainLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="receipt" size={size} color={color} />
           ),
-          href: (isFarmer || isBuyer) ? '/orders' : null,
         }}
       />
 
-      {/* Intelligence - Hidden from tabs, accessed via dashboard */}
-      <Tabs.Screen
-        name="intelligence"
-        options={{
-          title: t('market_intelligence'),
-          href: null,
-        }}
-      />
-
-      {/* SACCO - Hidden from tabs, accessed via Profile */}
-      <Tabs.Screen
-        name="sacco"
-        options={{
-          title: t('sacco'),
-          href: null,
-        }}
-      />
-
-      {/* Profile - All roles */}
+      {/* Tab 4: Profile - All roles */}
       <Tabs.Screen
         name="profile"
         options={{
@@ -141,20 +140,14 @@ function MainLayout() {
         }}
       />
 
-      {/* Grade - Farmers only */}
-      <Tabs.Screen
-        name="grade"
-        options={{
-          title: 'Grade',
-          tabBarLabel: 'Grade',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="camera" size={size} color={color} />
-          ),
-          href: isFarmer ? '/grade' : null,
-        }}
-      />
-
-      {/* Hidden screens */}
+      {/* === HIDDEN SCREENS (accessed via navigation, not tabs) === */}
+      <Tabs.Screen name="sell" options={{ title: t('sell_produce'), href: null }} />
+      <Tabs.Screen name="grade" options={{ title: t('grade'), href: null }} />
+      <Tabs.Screen name="intelligence" options={{ title: t('market_intelligence'), href: null }} />
+      <Tabs.Screen name="sacco" options={{ title: t('sacco'), href: null }} />
+      <Tabs.Screen name="notifications" options={{ title: t('notifications'), href: null }} />
+      <Tabs.Screen name="user-profile" options={{ title: t('view_profile'), href: null }} />
+      <Tabs.Screen name="privacy" options={{ title: t('privacy_policy') || 'Privacy Policy', href: null }} />
       <Tabs.Screen name="auth" options={{ href: null }} />
     </Tabs>
   );
@@ -163,9 +156,15 @@ function MainLayout() {
 export default function Layout() {
   return (
     <LanguageProvider>
-      <AuthProvider>
-        <MainLayout />
-      </AuthProvider>
+      <ThemeProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <MainLayout />
+            </NotificationProvider>
+          </AuthProvider>
+        </ToastProvider>
+      </ThemeProvider>
     </LanguageProvider>
   );
 }
@@ -175,6 +174,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background.secondary,
   },
 });
