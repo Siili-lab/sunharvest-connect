@@ -46,12 +46,15 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
       AFRICAS_TALKING_API_KEY: ${AFRICAS_TALKING_API_KEY}
       AFRICAS_TALKING_USERNAME: ${AFRICAS_TALKING_USERNAME}
+      ML_SERVER_URL: http://ml-server:5000
     ports:
       - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      ml-server:
         condition: service_started
     volumes:
       - ../../backend/src:/app/src
@@ -64,13 +67,12 @@ services:
       dockerfile: Dockerfile
     container_name: sunharvest-ml
     environment:
-      MODEL_PATH: /models/quality_grading.tflite
       PYTHONUNBUFFERED: 1
     ports:
       - "5000:5000"
     volumes:
-      - ../../ml/models:/models:ro
-    command: gunicorn --bind 0.0.0.0:5000 server:app
+      - ../../ml/models:/app/models:ro
+    command: gunicorn --bind 0.0.0.0:5000 --timeout 120 --workers 1 server:app
 
 volumes:
   postgres_data:
