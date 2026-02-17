@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
   View,
-  Text,
   FlatList,
   StyleSheet,
   ActivityIndicator,
@@ -10,16 +9,21 @@ import {
   Modal,
   Linking,
   Alert,
-  TextInput,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
   Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { getListings, getMarketPrices, createOffer, Listing, MarketPrice } from '../services/api';
 import TrustScoreBadge from '../components/TrustScoreBadge';
+import { Text } from '../components/primitives/Text';
+import { Input } from '../components/primitives/Input';
+import { Button } from '../components/primitives/Button';
+import { colors, spacing, radius, shadows } from '@/theme';
 
 interface EnhancedListing extends Listing {
   aiConfidence?: number;
@@ -29,7 +33,9 @@ interface EnhancedListing extends Listing {
 }
 
 export default function MarketScreen() {
+  const router = useRouter();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const isBuyer = user?.userType === 'buyer';
   const isFarmer = user?.userType === 'farmer';
 
@@ -82,50 +88,10 @@ export default function MarketScreen() {
     ],
   };
 
-  const MOCK_LISTINGS: EnhancedListing[] = [
-    {
-      id: '1', crop: 'Tomatoes', grade: 'Grade A', price: 100, quantity: 500,
-      farmer: 'John Kamau', location: 'Kiambu', aiConfidence: 94, phone: '+254712345678',
-      images: CROP_IMAGES.Tomatoes,
-    },
-    {
-      id: '2', crop: 'Potatoes', grade: 'Premium', price: 80, quantity: 1000,
-      farmer: 'Mary Wanjiku', location: 'Nyandarua', aiConfidence: 97, phone: '+254723456789',
-      images: CROP_IMAGES.Potatoes,
-    },
-    {
-      id: '3', crop: 'Onions', grade: 'Grade B', price: 60, quantity: 300,
-      farmer: 'Peter Ochieng', location: 'Kajiado', aiConfidence: 82, phone: '+254734567890',
-      images: CROP_IMAGES.Onions,
-    },
-    {
-      id: '4', crop: 'Carrots', grade: 'Grade A', price: 90, quantity: 450,
-      farmer: 'Sarah Akinyi', location: 'Machakos', aiConfidence: 91, phone: '+254745678901',
-      images: CROP_IMAGES.Carrots,
-    },
-    {
-      id: '5', crop: 'Cabbage', grade: 'Premium', price: 45, quantity: 800,
-      farmer: 'David Mwangi', location: 'Limuru', aiConfidence: 96, phone: '+254756789012',
-      images: CROP_IMAGES.Cabbage,
-    },
-    {
-      id: '6', crop: 'Kale', grade: 'Grade A', price: 50, quantity: 200,
-      farmer: 'Grace Njeri', location: 'Nyeri', aiConfidence: 89, phone: '+254767890123',
-      images: CROP_IMAGES.Kale,
-    },
-    {
-      id: '7', crop: 'Spinach', grade: 'Premium', price: 55, quantity: 150,
-      farmer: 'James Mutua', location: 'Meru', aiConfidence: 93, phone: '+254778901234',
-      images: CROP_IMAGES.Spinach,
-    },
-    {
-      id: '8', crop: 'Mangoes', grade: 'Grade A', price: 150, quantity: 600,
-      farmer: 'Elizabeth Wambui', location: 'Makueni', aiConfidence: 95, phone: '+254789012345',
-      images: CROP_IMAGES.Mangoes,
-    },
-  ];
+  const [fetchError, setFetchError] = useState(false);
 
   const fetchData = async () => {
+    setFetchError(false);
     try {
       const [listingsData, pricesData] = await Promise.all([
         getListings(),
@@ -139,22 +105,17 @@ export default function MarketScreen() {
         return {
           ...listing,
           images: listing.images && listing.images.length > 0 ? listing.images : cropImages,
-          aiConfidence: listing.aiConfidence || 90 + Math.floor(Math.random() * 8),
+          aiConfidence: listing.aiConfidence || null,
         };
       });
 
-      setListings(enhancedListings.length > 0 ? enhancedListings : MOCK_LISTINGS);
+      setListings(enhancedListings);
       setPrices(pricesData);
     } catch (error) {
       console.log('Fetch error:', error);
-      setListings(MOCK_LISTINGS);
-      setPrices([
-        { crop: 'tomato', wholesale: 80, retail: 120, unit: 'kg', currency: 'KSh' },
-        { crop: 'potato', wholesale: 60, retail: 90, unit: 'kg', currency: 'KSh' },
-        { crop: 'onion', wholesale: 70, retail: 100, unit: 'kg', currency: 'KSh' },
-        { crop: 'carrot', wholesale: 75, retail: 110, unit: 'kg', currency: 'KSh' },
-        { crop: 'cabbage', wholesale: 35, retail: 55, unit: 'kg', currency: 'KSh' },
-      ]);
+      setFetchError(true);
+      setListings([]);
+      setPrices([]);
     }
     setLoading(false);
     setRefreshing(false);
@@ -237,9 +198,9 @@ export default function MarketScreen() {
       'Confirm Offer',
       `Submit offer for ${qty} kg of ${selectedListing.crop} at KSh ${price}/kg?\n\nTotal: KSh ${totalValue.toLocaleString()}\n\nYour payment will be held in escrow until delivery is confirmed.`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Submit Offer',
+          text: t('submit_offer'),
           onPress: async () => {
             setSubmittingOffer(true);
             try {
@@ -278,15 +239,15 @@ export default function MarketScreen() {
   };
 
   const gradeColors: Record<string, string> = {
-    Premium: '#1B5E20',
-    'Grade A': '#388E3C',
-    'Grade B': '#F57C00',
+    Premium: colors.grade.premium.text,
+    'Grade A': colors.grade.gradeA.text,
+    'Grade B': colors.grade.gradeB.text,
   };
 
   const gradeBgColors: Record<string, string> = {
-    Premium: '#E8F5E9',
-    'Grade A': '#F1F8E9',
-    'Grade B': '#FFF3E0',
+    Premium: colors.grade.premium.light,
+    'Grade A': colors.grade.gradeA.light,
+    'Grade B': colors.grade.gradeB.light,
   };
 
   const ListingCard = ({ item }: { item: EnhancedListing }) => {
@@ -298,6 +259,8 @@ export default function MarketScreen() {
         style={styles.card}
         activeOpacity={0.7}
         onPress={() => setSelectedListing(item)}
+        accessibilityLabel={`${item.crop} ${item.grade} by ${item.farmer}, KSh ${item.price} ${t('per_kg')}, ${item.quantity} ${t('kg_available')}`}
+        accessibilityRole="button"
       >
         {/* Product Image */}
         {imageUrl && !imageError ? (
@@ -306,10 +269,11 @@ export default function MarketScreen() {
             style={styles.cardImage}
             resizeMode="cover"
             onError={() => setImageError(true)}
+            accessibilityLabel={`${item.crop} product image`}
           />
         ) : (
           <View style={styles.cardImagePlaceholder}>
-            <Ionicons name="leaf" size={48} color="#A5D6A7" />
+            <Ionicons name="leaf" size={48} color={colors.primary[200]} />
             <Text style={styles.placeholderText}>{item.crop}</Text>
           </View>
         )}
@@ -319,9 +283,9 @@ export default function MarketScreen() {
           <View style={styles.cropRow}>
             <Text style={styles.crop}>{item.crop}</Text>
             {item.aiConfidence && (
-              <View style={styles.aiVerifiedBadge}>
-                <Ionicons name="shield-checkmark" size={12} color="#1976D2" />
-                <Text style={styles.aiVerifiedText}>AI Graded</Text>
+              <View style={styles.aiVerifiedBadge} accessibilityLabel={`${t('ai_graded')} ${item.aiConfidence}%`}>
+                <Ionicons name="shield-checkmark" size={12} color={colors.text.link} />
+                <Text style={styles.aiVerifiedText}>{t('ai_graded')}</Text>
               </View>
             )}
           </View>
@@ -333,8 +297,8 @@ export default function MarketScreen() {
         </View>
 
         <View style={styles.cardBody}>
-          <Text style={styles.price}>KSh {item.price}/kg</Text>
-          <Text style={styles.quantity}>{item.quantity} kg available</Text>
+          <Text style={styles.price}>KSh {item.price}/{t('per_kg')}</Text>
+          <Text style={styles.quantity}>{item.quantity} {t('kg_available')}</Text>
         </View>
 
 
@@ -351,22 +315,23 @@ export default function MarketScreen() {
             </View>
           </View>
           <View style={styles.locationBadge}>
-            <Ionicons name="location-outline" size={12} color="#666" />
+            <Ionicons name="location-outline" size={12} color={colors.text.secondary} />
             <Text style={styles.location}>{item.location}</Text>
           </View>
         </View>
 
         {isBuyer && (
-          <TouchableOpacity
+          <Button
+            variant="primary"
+            size="medium"
+            fullWidth
+            onPress={() => openOfferModal(item)}
+            leftIcon={<Ionicons name="pricetag" size={18} color={colors.neutral[0]} />}
             style={styles.makeOfferButton}
-            onPress={(e) => {
-              e.stopPropagation();
-              openOfferModal(item);
-            }}
+            accessibilityLabel={`${t('make_offer')} ${item.crop}`}
           >
-            <Ionicons name="pricetag" size={18} color="#fff" />
-            <Text style={styles.makeOfferButtonText}>Make Offer</Text>
-          </TouchableOpacity>
+            {t('make_offer')}
+          </Button>
         )}
       </View>
     </TouchableOpacity>
@@ -380,57 +345,59 @@ export default function MarketScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2E7D32" />
-        <Text style={styles.loadingText}>Loading market data...</Text>
+        <ActivityIndicator size="large" color={colors.primary[800]} />
+        <Text style={styles.loadingText}>{t('loading')}</Text>
       </View>
     );
   }
 
-  return (
-    <View style={styles.container}>
+  const listHeader = () => (
+    <>
       {/* Market Prices Ticker */}
       {prices.length > 0 && (
         <View style={styles.pricesSection}>
           <View style={styles.pricesHeader}>
-            <Text style={styles.sectionTitle}>Today's Market Prices</Text>
-            <View style={styles.liveBadge}>
+            <Text style={styles.sectionTitle}>{t('todays_market_prices')}</Text>
+            <View style={styles.liveBadge} accessibilityLabel={t('live')}>
               <View style={styles.liveDot} />
-              <Text style={styles.liveText}>Live</Text>
+              <Text style={styles.liveText}>{t('live')}</Text>
             </View>
           </View>
-          <FlatList
+          <ScrollView
             horizontal
-            data={prices}
-            keyExtractor={(item) => item.crop}
             showsHorizontalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <View style={styles.priceCard}>
+          >
+            {prices.map((item) => (
+              <View key={item.crop} style={styles.priceCard} accessibilityLabel={`${item.crop} KSh ${item.wholesale} ${t('per_kg')}`}>
                 <Text style={styles.priceCrop}>{item.crop}</Text>
                 <Text style={styles.priceValue}>KSh {item.wholesale}</Text>
-                <Text style={styles.priceUnit}>per {item.unit}</Text>
+                <Text style={styles.priceUnit}>{t('per_kg')}</Text>
               </View>
-            )}
-          />
+            ))}
+          </ScrollView>
         </View>
       )}
 
       {/* Search & Filters */}
       <View style={styles.searchSection}>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#9E9E9E" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search crops, farmers, locations..."
-            placeholderTextColor="#9E9E9E"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Ionicons name="close-circle" size={20} color="#9E9E9E" />
-            </TouchableOpacity>
-          )}
-        </View>
+        <Input
+          placeholder={t('search_crops')}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          leftIcon={<Ionicons name="search" size={20} color={colors.neutral[500]} />}
+          rightIcon={
+            searchQuery.length > 0 ? (
+              <TouchableOpacity
+                onPress={() => setSearchQuery('')}
+                accessibilityLabel={t('close')}
+              >
+                <Ionicons name="close-circle" size={20} color={colors.neutral[500]} />
+              </TouchableOpacity>
+            ) : undefined
+          }
+          containerStyle={styles.searchInputContainer}
+          accessibilityLabel={t('search_crops')}
+        />
 
         {uniqueCrops.length > 0 && (
           <ScrollView
@@ -442,9 +409,12 @@ export default function MarketScreen() {
             <TouchableOpacity
               style={[styles.filterChip, !selectedFilter && styles.filterChipActive]}
               onPress={() => setSelectedFilter(null)}
+              accessibilityLabel={t('all')}
+              accessibilityRole="button"
+              accessibilityState={{ selected: !selectedFilter }}
             >
               <Text style={[styles.filterChipText, !selectedFilter && styles.filterChipTextActive]}>
-                All
+                {t('all')}
               </Text>
             </TouchableOpacity>
             {uniqueCrops.map((crop) => (
@@ -452,6 +422,9 @@ export default function MarketScreen() {
                 key={crop}
                 style={[styles.filterChip, selectedFilter === crop && styles.filterChipActive]}
                 onPress={() => setSelectedFilter(selectedFilter === crop ? null : crop)}
+                accessibilityLabel={crop}
+                accessibilityRole="button"
+                accessibilityState={{ selected: selectedFilter === crop }}
               >
                 <Text style={[styles.filterChipText, selectedFilter === crop && styles.filterChipTextActive]}>
                   {crop}
@@ -462,31 +435,50 @@ export default function MarketScreen() {
         )}
       </View>
 
-      {/* Listings */}
-      <View style={styles.listingsSection}>
-        <View style={styles.listingsHeader}>
-          <Text style={styles.sectionTitle}>Available Listings</Text>
-          <Text style={styles.listingsCount}>{filteredListings.length} items</Text>
-        </View>
-        <FlatList
+      {/* Listings Header */}
+      <View style={styles.listingsHeader}>
+        <Text style={styles.sectionTitle}>{t('available_listings')}</Text>
+        <Text style={styles.listingsCount}>{filteredListings.length} items</Text>
+      </View>
+    </>
+  );
+
+  return (
+    <View style={styles.container}>
+      <FlatList
           data={filteredListings}
           keyExtractor={(item) => item.id}
           renderItem={renderListing}
+          ListHeaderComponent={listHeader}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2E7D32']} />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary[800]]} />
           }
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <Ionicons name="leaf-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyTitle}>No Listings Found</Text>
+              <Ionicons name={fetchError ? 'cloud-offline-outline' : 'leaf-outline'} size={64} color={colors.neutral[400]} />
+              <Text style={styles.emptyTitle}>{fetchError ? t('no_listings_available') : t('no_listings')}</Text>
               <Text style={styles.emptyText}>
-                {searchQuery || selectedFilter ? 'Try a different search' : 'Check back later for new listings'}
+                {fetchError
+                  ? t('network_error')
+                  : searchQuery || selectedFilter
+                    ? 'Try a different search'
+                    : t('check_back')}
               </Text>
+              {fetchError && (
+                <Button
+                  variant="primary"
+                  size="medium"
+                  onPress={() => { setLoading(true); fetchData(); }}
+                  leftIcon={<Ionicons name="refresh" size={18} color={colors.neutral[0]} />}
+                  style={{ marginTop: spacing[4] }}
+                >
+                  {t('try_again')}
+                </Button>
+              )}
             </View>
           }
         />
-      </View>
 
       {/* Listing Detail Modal */}
       <Modal
@@ -513,6 +505,7 @@ export default function MarketScreen() {
                         source={{ uri: img }}
                         style={styles.modalImage}
                         resizeMode="cover"
+                        accessibilityLabel={`${selectedListing.crop} image ${idx + 1}`}
                       />
                     ))}
                   </ScrollView>
@@ -523,8 +516,10 @@ export default function MarketScreen() {
                   <TouchableOpacity
                     style={styles.closeButton}
                     onPress={() => setSelectedListing(null)}
+                    accessibilityLabel={t('close')}
+                    accessibilityRole="button"
                   >
-                    <Ionicons name="close" size={24} color="#666" />
+                    <Ionicons name="close" size={24} color={colors.text.secondary} />
                   </TouchableOpacity>
                 </View>
 
@@ -535,8 +530,8 @@ export default function MarketScreen() {
                     </Text>
                   </View>
                   {selectedListing.aiConfidence && (
-                    <View style={styles.aiConfidenceBadge}>
-                      <Ionicons name="shield-checkmark" size={14} color="#1976D2" />
+                    <View style={styles.aiConfidenceBadge} accessibilityLabel={`AI confidence ${selectedListing.aiConfidence}%`}>
+                      <Ionicons name="shield-checkmark" size={14} color={colors.text.link} />
                       <Text style={styles.aiConfidenceText}>
                         {selectedListing.aiConfidence}% AI Confidence
                       </Text>
@@ -546,27 +541,37 @@ export default function MarketScreen() {
 
                 <View style={styles.modalDetails}>
                   <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Price per kg</Text>
+                    <Text style={styles.detailLabel}>{t('price_per_kg')}</Text>
                     <Text style={styles.detailValue}>KSh {selectedListing.price}</Text>
                   </View>
                   <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Available Quantity</Text>
+                    <Text style={styles.detailLabel}>{t('quantity')}</Text>
                     <Text style={styles.detailValue}>{selectedListing.quantity} kg</Text>
                   </View>
                   <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Total Value</Text>
+                    <Text style={styles.detailLabel}>{t('total_value')}</Text>
                     <Text style={styles.detailValueHighlight}>
                       KSh {(selectedListing.price * selectedListing.quantity).toLocaleString()}
                     </Text>
                   </View>
                   <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Location</Text>
+                    <Text style={styles.detailLabel}>{t('location')}</Text>
                     <Text style={styles.detailValue}>{selectedListing.location}</Text>
                   </View>
                 </View>
 
                 {/* Farmer Info */}
-                <View style={styles.farmerCard}>
+                <TouchableOpacity
+                  style={styles.farmerCard}
+                  onPress={() => {
+                    if (selectedListing.farmerId) {
+                      setSelectedListing(null);
+                      router.push({ pathname: '/user-profile', params: { userId: selectedListing.farmerId } });
+                    }
+                  }}
+                  activeOpacity={selectedListing.farmerId ? 0.7 : 1}
+                  accessibilityLabel={`${t('view_profile')} ${selectedListing.farmer}`}
+                >
                   <View style={styles.farmerAvatarLarge}>
                     <Text style={styles.farmerAvatarText}>
                       {selectedListing.farmer.charAt(0)}
@@ -579,7 +584,7 @@ export default function MarketScreen() {
                   {selectedListing.farmerId && (
                     <TrustScoreBadge userId={selectedListing.farmerId} size="small" />
                   )}
-                </View>
+                </TouchableOpacity>
 
                 {/* Trust Score Detail */}
                 {selectedListing.farmerId && (
@@ -589,45 +594,55 @@ export default function MarketScreen() {
                 )}
 
                 {/* Contact Buttons */}
-                <Text style={styles.contactTitle}>Contact Farmer</Text>
+                <Text style={styles.contactTitle}>{t('contact_farmer')}</Text>
                 <View style={styles.contactButtons}>
-                  <TouchableOpacity
-                    style={styles.callButton}
+                  <Button
+                    variant="primary"
+                    size="medium"
                     onPress={() => handleCall(selectedListing.phone || '+254700000000')}
+                    leftIcon={<Ionicons name="call" size={18} color={colors.neutral[0]} />}
+                    style={styles.callButton}
+                    accessibilityLabel={`${t('call')} ${selectedListing.farmer}`}
                   >
-                    <Ionicons name="call" size={18} color="#fff" />
-                    <Text style={styles.callButtonText}>Call</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.whatsappButton}
+                    {t('call')}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="medium"
                     onPress={() => handleWhatsApp(selectedListing.phone || '+254700000000', selectedListing.crop)}
+                    leftIcon={<Ionicons name="logo-whatsapp" size={18} color={colors.neutral[0]} />}
+                    style={styles.whatsappButton}
+                    accessibilityLabel={`${t('whatsapp')} ${selectedListing.farmer}`}
                   >
-                    <Ionicons name="logo-whatsapp" size={18} color="#fff" />
-                    <Text style={styles.whatsappButtonText}>WhatsApp</Text>
-                  </TouchableOpacity>
+                    {t('whatsapp')}
+                  </Button>
                 </View>
 
                 {/* Make Offer Button (Buyers only) */}
                 {isBuyer && (
-                  <TouchableOpacity
-                    style={styles.primaryOfferButton}
+                  <Button
+                    variant="primary"
+                    size="large"
+                    fullWidth
                     onPress={() => {
                       setSelectedListing(null);
                       setTimeout(() => openOfferModal(selectedListing), 100);
                     }}
+                    leftIcon={<Ionicons name="pricetag" size={20} color={colors.neutral[0]} />}
+                    style={styles.primaryOfferButton}
+                    accessibilityLabel={`${t('make_offer')} ${selectedListing.crop}`}
                   >
-                    <Ionicons name="pricetag" size={20} color="#fff" />
-                    <Text style={styles.primaryOfferButtonText}>Make an Offer</Text>
-                  </TouchableOpacity>
+                    {t('make_offer')}
+                  </Button>
                 )}
 
                 {/* Escrow Info */}
-                <View style={styles.escrowInfo}>
-                  <Ionicons name="shield-checkmark" size={20} color="#2E7D32" />
+                <View style={styles.escrowInfo} accessibilityLabel={`${t('escrow_protection')}: ${t('escrow_description')}`}>
+                  <Ionicons name="shield-checkmark" size={20} color={colors.primary[800]} />
                   <View style={styles.escrowTextContainer}>
-                    <Text style={styles.escrowTitle}>Escrow Protection</Text>
+                    <Text style={styles.escrowTitle}>{t('escrow_protection')}</Text>
                     <Text style={styles.escrowText}>
-                      Your payment is held securely until you confirm delivery
+                      {t('escrow_description')}
                     </Text>
                   </View>
                 </View>
@@ -652,12 +667,14 @@ export default function MarketScreen() {
             {selectedListing && (
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Make an Offer</Text>
+                  <Text style={styles.modalTitle}>{t('make_offer')}</Text>
                   <TouchableOpacity
                     style={styles.closeButton}
                     onPress={() => setShowOfferModal(false)}
+                    accessibilityLabel={t('close')}
+                    accessibilityRole="button"
                   >
-                    <Ionicons name="close" size={24} color="#666" />
+                    <Ionicons name="close" size={24} color={colors.text.secondary} />
                   </TouchableOpacity>
                 </View>
 
@@ -666,91 +683,86 @@ export default function MarketScreen() {
                   <Text style={styles.offerCrop}>{selectedListing.crop}</Text>
                   <Text style={styles.offerFarmer}>by {selectedListing.farmer}</Text>
                   <View style={styles.offerOriginalPrice}>
-                    <Text style={styles.offerOriginalLabel}>Listed at</Text>
-                    <Text style={styles.offerOriginalValue}>KSh {selectedListing.price}/kg</Text>
+                    <Text style={styles.offerOriginalLabel}>{t('listed_price')}</Text>
+                    <Text style={styles.offerOriginalValue}>KSh {selectedListing.price}/{t('per_kg')}</Text>
                   </View>
                 </View>
 
                 {/* AI Price Suggestion */}
-                <View style={styles.aiSuggestion}>
-                  <Ionicons name="bulb" size={20} color="#F57C00" />
+                <View style={styles.aiSuggestion} accessibilityLabel={`${t('ai_fair_price')}: KSh ${getSuggestedPrice(selectedListing)} ${t('per_kg')}`}>
+                  <Ionicons name="bulb" size={20} color={colors.accent[700]} />
                   <View style={styles.aiSuggestionText}>
-                    <Text style={styles.aiSuggestionTitle}>AI Fair Price Suggestion</Text>
+                    <Text style={styles.aiSuggestionTitle}>{t('ai_fair_price')}</Text>
                     <Text style={styles.aiSuggestionValue}>
-                      KSh {getSuggestedPrice(selectedListing)}/kg based on current market
+                      KSh {getSuggestedPrice(selectedListing)}/{t('per_kg')} based on current market
                     </Text>
                   </View>
                 </View>
 
                 {/* Quantity Input */}
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Quantity (kg)</Text>
-                  <View style={styles.inputRow}>
-                    <TextInput
-                      style={styles.input}
-                      value={offerQuantity}
-                      onChangeText={setOfferQuantity}
-                      keyboardType="numeric"
-                      placeholder="Enter quantity"
-                    />
-                    <Text style={styles.inputHint}>
-                      Max: {selectedListing.quantity} kg
-                    </Text>
-                  </View>
-                </View>
+                <Input
+                  label={t('offer_quantity')}
+                  value={offerQuantity}
+                  onChangeText={setOfferQuantity}
+                  keyboardType="numeric"
+                  placeholder={t('offer_quantity')}
+                  helperText={`Max: ${selectedListing.quantity} kg`}
+                  accessibilityLabel={t('offer_quantity')}
+                />
 
                 {/* Price Input */}
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Your Offer Price (KSh/kg)</Text>
-                  <View style={styles.inputRow}>
-                    <TextInput
-                      style={styles.input}
-                      value={offerPrice}
-                      onChangeText={setOfferPrice}
-                      keyboardType="numeric"
-                      placeholder="Enter price"
-                    />
-                  </View>
-                </View>
+                <Input
+                  label={t('offer_price')}
+                  value={offerPrice}
+                  onChangeText={setOfferPrice}
+                  keyboardType="numeric"
+                  placeholder={t('offer_price')}
+                  accessibilityLabel={t('offer_price')}
+                />
 
                 {/* Quick Price Buttons */}
                 <View style={styles.quickPrices}>
                   <TouchableOpacity
                     style={styles.quickPriceButton}
                     onPress={() => setOfferPrice(selectedListing.price.toString())}
+                    accessibilityLabel={t('listed_price')}
+                    accessibilityRole="button"
                   >
-                    <Text style={styles.quickPriceText}>Listed Price</Text>
+                    <Text style={styles.quickPriceText}>{t('listed_price')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.quickPriceButton}
                     onPress={() => setOfferPrice(getSuggestedPrice(selectedListing).toString())}
+                    accessibilityLabel={t('ai_suggested')}
+                    accessibilityRole="button"
                   >
-                    <Text style={styles.quickPriceText}>AI Suggested</Text>
+                    <Text style={styles.quickPriceText}>{t('ai_suggested')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.quickPriceButton}
                     onPress={() => setOfferPrice(Math.round(selectedListing.price * 0.9).toString())}
+                    accessibilityLabel="-10%"
+                    accessibilityRole="button"
                   >
                     <Text style={styles.quickPriceText}>-10%</Text>
                   </TouchableOpacity>
                 </View>
 
                 {/* Message Input */}
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Message (Optional)</Text>
-                  <TextInput
-                    style={[styles.input, styles.messageInput]}
-                    value={offerMessage}
-                    onChangeText={setOfferMessage}
-                    placeholder="Add a note to the farmer..."
-                    multiline
-                    numberOfLines={3}
-                  />
-                </View>
+                <Input
+                  label={`${t('offer_message')} (Optional)`}
+                  value={offerMessage}
+                  onChangeText={setOfferMessage}
+                  placeholder={t('offer_message')}
+                  multiline
+                  numberOfLines={3}
+                  inputStyle={styles.messageInput}
+                  accessibilityLabel={t('offer_message')}
+                />
 
                 {/* Total Calculation */}
-                <View style={styles.totalSection}>
-                  <Text style={styles.totalLabel}>Total Amount</Text>
+                <View style={styles.totalSection} accessibilityLabel={`${t('total_amount')}: KSh ${((parseInt(offerQuantity) || 0) * (parseInt(offerPrice) || 0)).toLocaleString()}`}>
+                  <Text style={styles.totalLabel}>{t('total_amount')}</Text>
                   <Text style={styles.totalValue}>
                     KSh {((parseInt(offerQuantity) || 0) * (parseInt(offerPrice) || 0)).toLocaleString()}
                   </Text>
@@ -758,24 +770,25 @@ export default function MarketScreen() {
 
                 {/* Escrow Notice */}
                 <View style={styles.escrowNotice}>
-                  <Ionicons name="lock-closed" size={16} color="#2E7D32" />
+                  <Ionicons name="lock-closed" size={16} color={colors.primary[800]} />
                   <Text style={styles.escrowNoticeText}>
-                    Payment held in escrow until delivery confirmed
+                    {t('escrow_description')}
                   </Text>
                 </View>
 
                 {/* Submit Button */}
-                <TouchableOpacity
-                  style={[styles.submitOfferButton, submittingOffer && styles.submitOfferButtonDisabled]}
+                <Button
+                  variant="primary"
+                  size="large"
+                  fullWidth
                   onPress={submitOffer}
                   disabled={submittingOffer}
+                  loading={submittingOffer}
+                  style={styles.submitOfferButton}
+                  accessibilityLabel={t('submit_offer')}
                 >
-                  {submittingOffer ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <Text style={styles.submitOfferButtonText}>Submit Offer</Text>
-                  )}
-                </TouchableOpacity>
+                  {t('submit_offer')}
+                </Button>
               </ScrollView>
             )}
           </View>
@@ -788,364 +801,341 @@ export default function MarketScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.neutral[50],
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.neutral[50],
   },
   loadingText: {
-    marginTop: 16,
+    marginTop: spacing[4],
     fontSize: 16,
-    color: '#666',
+    color: colors.text.secondary,
   },
   pricesSection: {
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingTop: spacing[4],
+    paddingBottom: spacing[3],
     borderBottomWidth: 1,
-    borderBottomColor: '#E8F5E9',
+    borderBottomColor: colors.primary[50],
   },
   pricesHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    paddingHorizontal: spacing[4],
+    marginBottom: spacing[3],
   },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#666',
+    color: colors.text.secondary,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: spacing[1],
   },
   liveDot: {
     width: 6,
     height: 6,
-    borderRadius: 3,
-    backgroundColor: '#4CAF50',
+    borderRadius: radius.full,
+    backgroundColor: colors.semantic.success,
   },
   liveText: {
     fontSize: 11,
-    color: '#4CAF50',
+    color: colors.semantic.success,
     fontWeight: '600',
   },
   searchSection: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[3],
+    paddingBottom: spacing[2],
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: '#E8F5E9',
-    gap: 10,
-  },
-  searchInput: {
-    flex: 1,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#333',
+  searchInputContainer: {
+    marginBottom: 0,
   },
   filterChips: {
-    marginTop: 12,
+    marginTop: spacing[3],
   },
   filterChipsContent: {
-    paddingRight: 16,
+    paddingRight: spacing[4],
   },
   filterChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    marginRight: 8,
+    paddingHorizontal: spacing[3.5],
+    paddingVertical: spacing[2],
+    borderRadius: radius.full,
+    backgroundColor: colors.neutral[0],
+    marginRight: spacing[2],
     borderWidth: 1,
-    borderColor: '#E8F5E9',
+    borderColor: colors.primary[50],
   },
   filterChipActive: {
-    backgroundColor: '#E8F5E9',
-    borderColor: '#2E7D32',
+    backgroundColor: colors.primary[50],
+    borderColor: colors.primary[800],
   },
   filterChipText: {
     fontSize: 13,
-    color: '#666',
+    color: colors.text.secondary,
     fontWeight: '500',
   },
   filterChipTextActive: {
-    color: '#2E7D32',
+    color: colors.primary[800],
     fontWeight: '600',
   },
   listingsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[4],
+    marginBottom: spacing[3],
   },
   listingsCount: {
     fontSize: 12,
-    color: '#9E9E9E',
+    color: colors.neutral[500],
   },
   priceCard: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginLeft: 12,
+    backgroundColor: colors.neutral[0],
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[3.5],
+    borderRadius: radius.lg,
+    marginLeft: spacing[3],
     minWidth: 100,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8F5E9',
+    borderColor: colors.primary[50],
   },
   priceCrop: {
     fontSize: 13,
-    color: '#666',
+    color: colors.text.secondary,
     textTransform: 'capitalize',
-    marginBottom: 4,
+    marginBottom: spacing[1],
   },
   priceValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   priceUnit: {
     fontSize: 11,
-    color: '#9E9E9E',
-    marginTop: 2,
+    color: colors.neutral[500],
+    marginTop: spacing[0.5],
   },
   listingsSection: {
     flex: 1,
-    paddingTop: 16,
+    paddingTop: spacing[4],
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    marginHorizontal: 16,
-    marginBottom: 12,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.xl,
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[3],
     borderWidth: 1,
-    borderColor: '#E8F5E9',
-    elevation: 2,
+    borderColor: colors.primary[50],
+    ...shadows.sm,
     overflow: 'hidden',
   },
   cardImage: {
     width: '100%',
     height: 160,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: colors.primary[50],
   },
   cardImagePlaceholder: {
     width: '100%',
     height: 160,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: colors.primary[50],
     justifyContent: 'center',
     alignItems: 'center',
   },
   placeholderText: {
-    marginTop: 8,
+    marginTop: spacing[2],
     fontSize: 14,
-    color: '#66BB6A',
+    color: colors.primary[400],
     fontWeight: '600',
   },
   cardContent: {
-    padding: 16,
+    padding: spacing[4],
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   cropRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing[2],
   },
   crop: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   aiVerifiedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    gap: 4,
+    backgroundColor: colors.semantic.infoLight,
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[0.5],
+    borderRadius: radius.lg,
+    gap: spacing[1],
   },
   aiVerifiedText: {
     fontSize: 10,
-    color: '#1976D2',
+    color: colors.text.link,
     fontWeight: '600',
   },
   gradeBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.md,
   },
   gradeText: {
     fontSize: 12,
     fontWeight: '600',
   },
   cardBody: {
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   price: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#333',
+    color: colors.text.primary,
   },
   quantity: {
     fontSize: 14,
-    color: '#666',
-    marginTop: 4,
+    color: colors.text.secondary,
+    marginTop: spacing[1],
   },
   cardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 12,
+    paddingTop: spacing[3],
     borderTopWidth: 1,
-    borderTopColor: '#F5F5F5',
+    borderTopColor: colors.neutral[100],
   },
   farmerInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing[2.5],
   },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E8F5E9',
+    width: spacing[9],
+    height: spacing[9],
+    borderRadius: spacing[9] / 2,
+    backgroundColor: colors.primary[50],
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   farmer: {
     fontSize: 14,
-    color: '#333',
+    color: colors.text.primary,
     fontWeight: '500',
   },
   locationBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F5F5F5',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 4,
+    backgroundColor: colors.neutral[100],
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.md,
+    gap: spacing[1],
   },
   location: {
     fontSize: 12,
-    color: '#666',
+    color: colors.text.secondary,
   },
   makeOfferButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2E7D32',
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: 10,
-    gap: 8,
-  },
-  makeOfferButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+    marginTop: spacing[3],
+    borderRadius: radius.lg,
   },
   emptyState: {
     alignItems: 'center',
-    paddingTop: 60,
+    paddingTop: spacing[16],
   },
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
+    color: colors.text.primary,
+    marginTop: spacing[4],
   },
   emptyText: {
     fontSize: 14,
-    color: '#666',
-    marginTop: 8,
+    color: colors.text.secondary,
+    marginTop: spacing[2],
   },
   // Modal styles
   modalImages: {
-    marginHorizontal: -24,
-    marginTop: -24,
-    marginBottom: 16,
+    marginHorizontal: -spacing[6],
+    marginTop: -spacing[6],
+    marginBottom: spacing[4],
   },
   modalImagesContent: {
-    paddingHorizontal: 24,
-    gap: 8,
+    paddingHorizontal: spacing[6],
+    gap: spacing[2],
   },
   modalImage: {
     width: 200,
     height: 150,
-    borderRadius: 12,
-    backgroundColor: '#E8F5E9',
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary[50],
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.overlay.dark,
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing[6],
     maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: spacing[4],
   },
   modalCrop: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#333',
+    color: colors.text.primary,
   },
   closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F5F5F5',
+    width: spacing[9],
+    height: spacing[9],
+    borderRadius: spacing[9] / 2,
+    backgroundColor: colors.neutral[100],
     justifyContent: 'center',
     alignItems: 'center',
   },
   modalBadges: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
+    gap: spacing[2],
+    marginBottom: spacing[5],
   },
   modalGradeBadge: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 10,
+    paddingHorizontal: spacing[3.5],
+    paddingVertical: spacing[1.5],
+    borderRadius: radius.lg,
   },
   modalGradeText: {
     fontSize: 14,
@@ -1154,66 +1144,66 @@ const styles = StyleSheet.create({
   aiConfidenceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
-    gap: 6,
+    backgroundColor: colors.semantic.infoLight,
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1.5],
+    borderRadius: radius.lg,
+    gap: spacing[1.5],
   },
   aiConfidenceText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#1976D2',
+    color: colors.text.link,
   },
   modalDetails: {
-    backgroundColor: '#FAFAFA',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    backgroundColor: colors.neutral[50],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginBottom: spacing[5],
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: spacing[2],
   },
   detailLabel: {
     fontSize: 14,
-    color: '#666',
+    color: colors.text.secondary,
   },
   detailValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: colors.text.primary,
   },
   detailValueHighlight: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   farmerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.primary[50],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginBottom: spacing[3],
   },
   trustScoreSection: {
-    marginBottom: 20,
+    marginBottom: spacing[5],
   },
   farmerAvatarLarge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#fff',
+    width: spacing[12],
+    height: spacing[12],
+    borderRadius: spacing[12] / 2,
+    backgroundColor: colors.neutral[0],
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: spacing[3],
   },
   farmerAvatarText: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   farmerDetails: {
     flex: 1,
@@ -1221,75 +1211,45 @@ const styles = StyleSheet.create({
   farmerName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   farmerLocation: {
     fontSize: 13,
-    color: '#666',
-    marginTop: 2,
+    color: colors.text.secondary,
+    marginTop: spacing[0.5],
   },
   contactTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    color: colors.text.primary,
+    marginBottom: spacing[3],
   },
   contactButtons: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 16,
+    gap: spacing[2.5],
+    marginBottom: spacing[4],
   },
   callButton: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2E7D32',
-    paddingVertical: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  callButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.lg,
   },
   whatsappButton: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: '#25D366',
-    paddingVertical: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  whatsappButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
+    borderRadius: radius.lg,
   },
   primaryOfferButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1976D2',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
-    marginBottom: 16,
-  },
-  primaryOfferButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
+    backgroundColor: colors.text.link,
+    borderRadius: radius.lg,
+    marginBottom: spacing[4],
   },
   escrowInfo: {
     flexDirection: 'row',
-    backgroundColor: '#E8F5E9',
-    padding: 12,
-    borderRadius: 10,
-    gap: 10,
+    backgroundColor: colors.primary[50],
+    padding: spacing[3],
+    borderRadius: radius.lg,
+    gap: spacing[2.5],
   },
   escrowTextContainer: {
     flex: 1,
@@ -1297,61 +1257,61 @@ const styles = StyleSheet.create({
   escrowTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   escrowText: {
     fontSize: 12,
-    color: '#666',
-    marginTop: 2,
+    color: colors.text.secondary,
+    marginTop: spacing[0.5],
   },
   // Offer Modal
   offerModalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing[6],
     maxHeight: '95%',
   },
   offerListingSummary: {
-    backgroundColor: '#F5F5F5',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
+    backgroundColor: colors.neutral[100],
+    padding: spacing[4],
+    borderRadius: radius.lg,
+    marginBottom: spacing[4],
   },
   offerCrop: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#333',
+    color: colors.text.primary,
   },
   offerFarmer: {
     fontSize: 14,
-    color: '#666',
-    marginTop: 4,
+    color: colors.text.secondary,
+    marginTop: spacing[1],
   },
   offerOriginalPrice: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 12,
-    paddingTop: 12,
+    marginTop: spacing[3],
+    paddingTop: spacing[3],
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopColor: colors.border.light,
   },
   offerOriginalLabel: {
     fontSize: 14,
-    color: '#666',
+    color: colors.text.secondary,
   },
   offerOriginalValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: colors.text.primary,
   },
   aiSuggestion: {
     flexDirection: 'row',
-    backgroundColor: '#FFF8E1',
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 20,
-    gap: 10,
+    backgroundColor: colors.accent[50],
+    padding: spacing[3],
+    borderRadius: radius.lg,
+    marginBottom: spacing[5],
+    gap: spacing[2.5],
   },
   aiSuggestionText: {
     flex: 1,
@@ -1359,103 +1319,65 @@ const styles = StyleSheet.create({
   aiSuggestionTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#E65100',
+    color: colors.accent[900],
   },
   aiSuggestionValue: {
     fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-    marginBottom: 8,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: '#fff',
+    color: colors.text.secondary,
+    marginTop: spacing[0.5],
   },
   messageInput: {
     minHeight: 80,
     textAlignVertical: 'top',
   },
-  inputHint: {
-    fontSize: 12,
-    color: '#999',
-  },
   quickPrices: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
+    gap: spacing[2],
+    marginBottom: spacing[4],
   },
   quickPriceButton: {
     flex: 1,
-    paddingVertical: 10,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 8,
+    paddingVertical: spacing[2.5],
+    backgroundColor: colors.neutral[100],
+    borderRadius: radius.md,
     alignItems: 'center',
   },
   quickPriceText: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#666',
+    color: colors.text.secondary,
   },
   totalSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#E8F5E9',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
+    backgroundColor: colors.primary[50],
+    padding: spacing[4],
+    borderRadius: radius.lg,
+    marginBottom: spacing[3],
   },
   totalLabel: {
     fontSize: 14,
-    color: '#333',
+    color: colors.text.primary,
   },
   totalValue: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   escrowNotice: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    marginBottom: 16,
+    gap: spacing[1.5],
+    marginBottom: spacing[4],
   },
   escrowNoticeText: {
     fontSize: 12,
-    color: '#666',
+    color: colors.text.secondary,
   },
   submitOfferButton: {
-    backgroundColor: '#2E7D32',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  submitOfferButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  submitOfferButtonDisabled: {
-    opacity: 0.6,
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.lg,
   },
 });

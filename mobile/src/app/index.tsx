@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { Text } from '../components/primitives/Text';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { useToast } from '../context/ToastContext';
+import { useNotifications } from '../context/NotificationContext';
+import { colors, spacing, fontSize, typography, radius, shadows } from '@/theme';
 import {
   getMarketPrices, getMarketIntelligence, getUserStats,
   MarketPrice, MarketIntelligence, UserStats,
@@ -25,16 +29,16 @@ const FALLBACK_TRANSPORTER_STATS: UserStats = {
 
 const AI_INSIGHTS = {
   farmer: [
-    { type: 'price_alert', icon: 'trending-up', color: '#2E7D32', title: 'Peak Season Alert', message: 'Tomato prices up 18% this week. List more inventory now!', action: 'Create Listing' },
-    { type: 'tip', icon: 'bulb', color: '#F57C00', title: 'Quality Tip', message: 'Grade A tomatoes selling 40% faster than Grade B', action: null },
+    { type: 'price_alert', icon: 'trending-up', color: colors.primary[800], title: 'Peak Season Alert', message: 'Tomato prices up 18% this week. List more inventory now!', action: 'Create Listing' },
+    { type: 'tip', icon: 'bulb', color: colors.accent[900], title: 'Quality Tip', message: 'Grade A tomatoes selling 40% faster than Grade B', action: null },
   ],
   buyer: [
-    { type: 'deal', icon: 'pricetag', color: '#2E7D32', title: 'Best Deals', message: '15 new Premium grade listings in your area', action: 'View Market' },
-    { type: 'restock', icon: 'alert-circle', color: '#F57C00', title: 'Restock Reminder', message: 'Your usual tomato order is due in 3 days', action: 'Reorder' },
+    { type: 'deal', icon: 'pricetag', color: colors.primary[800], title: 'Best Deals', message: '15 new Premium grade listings in your area', action: 'View Market' },
+    { type: 'restock', icon: 'alert-circle', color: colors.accent[900], title: 'Restock Reminder', message: 'Your usual tomato order is due in 3 days', action: 'Reorder' },
   ],
   transporter: [
-    { type: 'jobs', icon: 'car', color: '#2E7D32', title: 'High Demand', message: '15 delivery jobs available in Kiambu today', action: 'View Jobs' },
-    { type: 'bonus', icon: 'star', color: '#F57C00', title: 'Bonus Opportunity', message: 'Complete 5 more deliveries for KSh 500 bonus', action: null },
+    { type: 'jobs', icon: 'car', color: colors.primary[800], title: 'High Demand', message: '15 delivery jobs available in Kiambu today', action: 'View Jobs' },
+    { type: 'bonus', icon: 'star', color: colors.accent[900], title: 'Bonus Opportunity', message: 'Complete 5 more deliveries for KSh 500 bonus', action: null },
   ],
 };
 
@@ -42,6 +46,8 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const { t } = useLanguage();
+  const { showToast } = useToast();
+  const { unreadCount } = useNotifications();
   const [prices, setPrices] = useState<MarketPrice[]>([]);
   const [intelligence, setIntelligence] = useState<MarketIntelligence | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
@@ -72,7 +78,7 @@ export default function DashboardScreen() {
         dynamicInsights.push({
           type: 'peak',
           icon: 'trending-up',
-          color: '#4CAF50',
+          color: colors.semantic.success,
           title: 'Peak Season Alert',
           message: `${best.crop.charAt(0).toUpperCase() + best.crop.slice(1)} prices up ${best.changePercent}% this week. List now at KSh ${best.price}/kg!`,
           action: 'Create Listing',
@@ -86,7 +92,7 @@ export default function DashboardScreen() {
         dynamicInsights.push({
           type: 'demand',
           icon: 'flame',
-          color: '#F44336',
+          color: colors.semantic.error,
           title: 'High Demand',
           message: `${hotCrop} selling fast - avg ${hotCropData?.avgDaysToSell || 3} days to sell. Buyers are actively searching!`,
           action: 'Create Listing',
@@ -100,7 +106,7 @@ export default function DashboardScreen() {
         dynamicInsights.push({
           type: 'tip',
           icon: 'bulb',
-          color: '#FF9800',
+          color: colors.semantic.warning,
           title: 'Pricing Tip',
           message: `Grade A ${topCrop.crop} averages KSh ${topCrop.price}/kg. Premium grade can fetch 25% more.`,
           action: 'See Prices',
@@ -118,7 +124,7 @@ export default function DashboardScreen() {
         dynamicInsights.push({
           type: 'deal',
           icon: 'pricetag',
-          color: '#4CAF50',
+          color: colors.semantic.success,
           title: 'Best Deal',
           message: `${deal.crop.charAt(0).toUpperCase() + deal.crop.slice(1)} prices down ${Math.abs(deal.changePercent)}% - good time to buy at KSh ${deal.price}/kg`,
           action: 'View Market',
@@ -132,16 +138,40 @@ export default function DashboardScreen() {
         dynamicInsights.push({
           type: 'alert',
           icon: 'alert-circle',
-          color: '#F44336',
+          color: colors.semantic.error,
           title: 'Price Rising',
           message: `${rising.crop.charAt(0).toUpperCase() + rising.crop.slice(1)} up ${rising.changePercent}% - stock up before prices increase more`,
           action: 'View Market',
           actionData: null,
         });
       }
-    } else {
-      // TRANSPORTER insights
-      dynamicInsights.push(...AI_INSIGHTS.transporter);
+    } else if (isTransporter) {
+      // TRANSPORTER insights — use real stats when available
+      const s = stats;
+      const activeJobs = s?.activeJobs || 0;
+      const totalDeliveries = s?.totalDeliveries || 0;
+      dynamicInsights.push({
+        type: 'jobs',
+        icon: 'car',
+        color: colors.primary[800],
+        title: 'Delivery Jobs',
+        message: activeJobs > 0
+          ? `You have ${activeJobs} active delivery job${activeJobs > 1 ? 's' : ''} right now.`
+          : 'Check available delivery jobs in your area.',
+        action: 'View Jobs',
+        actionData: null,
+      });
+      if (totalDeliveries > 0) {
+        dynamicInsights.push({
+          type: 'stats',
+          icon: 'trophy',
+          color: colors.accent[900],
+          title: 'Your Progress',
+          message: `${totalDeliveries} deliveries completed. Keep building your reputation!`,
+          action: null,
+          actionData: null,
+        });
+      }
     }
 
     return dynamicInsights.slice(0, 2); // Show max 2 insights
@@ -211,7 +241,7 @@ export default function DashboardScreen() {
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2E7D32']} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary[800]]} />}
     >
       {/* Header */}
       <View style={styles.header}>
@@ -219,11 +249,17 @@ export default function DashboardScreen() {
           <Text style={styles.greeting}>{getGreeting()},</Text>
           <Text style={styles.userName}>{user?.name?.split(' ')[0] || 'User'}</Text>
         </View>
-        <TouchableOpacity style={styles.notificationBtn}>
-          <Ionicons name="notifications-outline" size={24} color="#333" />
-          <View style={styles.notificationBadge}>
-            <Text style={styles.notificationBadgeText}>3</Text>
-          </View>
+        <TouchableOpacity
+          style={styles.notificationBtn}
+          onPress={() => router.push('/notifications')}
+          accessibilityLabel={t('notifications')}
+        >
+          <Ionicons name="notifications-outline" size={24} color={colors.text.primary} />
+          {unreadCount > 0 && (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -231,31 +267,65 @@ export default function DashboardScreen() {
       <View style={styles.statsContainer}>
         {isFarmer && (() => {
           const s = stats || FALLBACK_FARMER_STATS;
+          const revenue = s.totalRevenue || 0;
+          const sold = s.totalSold || 0;
           return (
             <>
               <View style={styles.statCardPrimary}>
-                <Text style={styles.statLabel}>Total Revenue</Text>
-                <Text style={styles.statValueLarge}>KSh {(s.totalRevenue || 0).toLocaleString()}</Text>
-                <View style={styles.statChange}>
-                  <Ionicons name="leaf" size={14} color="#A5D6A7" />
-                  <Text style={styles.statChangeText}>{s.totalSold || 0} sold</Text>
+                <View style={styles.revenueHeader}>
+                  <View>
+                    <Text style={styles.revenueLabel}>{t('total_revenue')}</Text>
+                    <Text style={styles.revenueValue}>
+                      KSh {revenue.toLocaleString()}
+                    </Text>
+                  </View>
+                  <View style={styles.revenueIconWrap}>
+                    <Ionicons name="wallet" size={22} color={colors.primary[800]} />
+                  </View>
+                </View>
+                <View style={styles.revenueDivider} />
+                <View style={styles.revenueFooter}>
+                  <View style={styles.revenueFooterItem}>
+                    <Ionicons name="checkmark-circle" size={14} color={colors.primary[300]} />
+                    <Text style={styles.revenueFooterText}>{sold} {t('sold')}</Text>
+                  </View>
+                  <View style={styles.revenueFooterDot} />
+                  <View style={styles.revenueFooterItem}>
+                    <Ionicons name="leaf" size={14} color={colors.primary[300]} />
+                    <Text style={styles.revenueFooterText}>{s.activeListings || 0} {t('active')}</Text>
+                  </View>
+                  {(s.rating ?? 0) > 0 && (
+                    <>
+                      <View style={styles.revenueFooterDot} />
+                      <View style={styles.revenueFooterItem}>
+                        <Ionicons name="star" size={14} color={colors.accent[400]} />
+                        <Text style={styles.revenueFooterText}>{s.rating?.toFixed(1)}</Text>
+                      </View>
+                    </>
+                  )}
                 </View>
               </View>
               <View style={styles.statsRow}>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.primary[50] }]}>
+                    <Ionicons name="storefront-outline" size={18} color={colors.primary[700]} />
+                  </View>
                   <Text style={styles.statValue}>{s.activeListings || 0}</Text>
-                  <Text style={styles.statLabel}>Listings</Text>
-                  <Text style={styles.statSub}>{s.totalListings || 0} total</Text>
+                  <Text style={styles.statLabel}>{t('active')}</Text>
                 </View>
                 <View style={styles.statCard}>
-                  <Text style={styles.statValue}>{s.totalSold || 0}</Text>
-                  <Text style={styles.statLabel}>Sold</Text>
-                  <Text style={styles.statSubHighlight}>completed</Text>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.semantic.successLight }]}>
+                    <Ionicons name="bag-check-outline" size={18} color={colors.semantic.success} />
+                  </View>
+                  <Text style={styles.statValue}>{sold}</Text>
+                  <Text style={styles.statLabel}>{t('sold')}</Text>
                 </View>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.accent[50] }]}>
+                    <Ionicons name="star" size={18} color={colors.accent[600]} />
+                  </View>
                   <Text style={styles.statValue}>{s.rating?.toFixed(1) || '-'}</Text>
-                  <Text style={styles.statLabel}>Rating</Text>
-                  <Text style={styles.statSub}>{s.totalRatings} reviews</Text>
+                  <Text style={styles.statLabel}>{s.totalRatings} {t('reviews')}</Text>
                 </View>
               </View>
             </>
@@ -264,31 +334,55 @@ export default function DashboardScreen() {
 
         {isBuyer && (() => {
           const s = stats || FALLBACK_BUYER_STATS;
+          const spent = s.totalSpent || 0;
           return (
             <>
               <View style={styles.statCardPrimary}>
-                <Text style={styles.statLabel}>Total Spent</Text>
-                <Text style={styles.statValueLarge}>KSh {(s.totalSpent || 0).toLocaleString()}</Text>
-                <View style={styles.statChange}>
-                  <Ionicons name="cart" size={14} color="#A5D6A7" />
-                  <Text style={styles.statChangeText}>{s.totalPurchases || 0} purchases</Text>
+                <View style={styles.revenueHeader}>
+                  <View>
+                    <Text style={styles.revenueLabel}>{t('total_spent')}</Text>
+                    <Text style={styles.revenueValue}>
+                      KSh {spent.toLocaleString()}
+                    </Text>
+                  </View>
+                  <View style={styles.revenueIconWrap}>
+                    <Ionicons name="cart" size={22} color={colors.primary[800]} />
+                  </View>
+                </View>
+                <View style={styles.revenueDivider} />
+                <View style={styles.revenueFooter}>
+                  <View style={styles.revenueFooterItem}>
+                    <Ionicons name="checkmark-circle" size={14} color={colors.primary[300]} />
+                    <Text style={styles.revenueFooterText}>{s.totalPurchases || 0} {t('purchases')}</Text>
+                  </View>
+                  <View style={styles.revenueFooterDot} />
+                  <View style={styles.revenueFooterItem}>
+                    <Ionicons name="time-outline" size={14} color={colors.primary[300]} />
+                    <Text style={styles.revenueFooterText}>{s.activeOffers || 0} {t('pending')}</Text>
+                  </View>
                 </View>
               </View>
               <View style={styles.statsRow}>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.semantic.warningLight }]}>
+                    <Ionicons name="hourglass-outline" size={18} color={colors.semantic.warning} />
+                  </View>
                   <Text style={styles.statValue}>{s.activeOffers || 0}</Text>
-                  <Text style={styles.statLabel}>Active</Text>
-                  <Text style={styles.statSubHighlight}>offers</Text>
+                  <Text style={styles.statLabel}>{t('offers')}</Text>
                 </View>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.semantic.successLight }]}>
+                    <Ionicons name="bag-check-outline" size={18} color={colors.semantic.success} />
+                  </View>
                   <Text style={styles.statValue}>{s.totalPurchases || 0}</Text>
-                  <Text style={styles.statLabel}>Completed</Text>
-                  <Text style={styles.statSub}>orders</Text>
+                  <Text style={styles.statLabel}>{t('orders')}</Text>
                 </View>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.accent[50] }]}>
+                    <Ionicons name="star" size={18} color={colors.accent[600]} />
+                  </View>
                   <Text style={styles.statValue}>{s.rating?.toFixed(1) || '-'}</Text>
-                  <Text style={styles.statLabel}>Rating</Text>
-                  <Text style={styles.statSub}>{s.totalRatings} reviews</Text>
+                  <Text style={styles.statLabel}>{s.totalRatings} {t('reviews')}</Text>
                 </View>
               </View>
             </>
@@ -300,28 +394,53 @@ export default function DashboardScreen() {
           return (
             <>
               <View style={styles.statCardPrimary}>
-                <Text style={styles.statLabel}>Deliveries</Text>
-                <Text style={styles.statValueLarge}>{s.totalDeliveries || 0}</Text>
-                <View style={styles.statChange}>
-                  <Ionicons name="car" size={14} color="#A5D6A7" />
-                  <Text style={styles.statChangeText}>{s.activeJobs || 0} active now</Text>
+                <View style={styles.revenueHeader}>
+                  <View>
+                    <Text style={styles.revenueLabel}>{t('deliveries')}</Text>
+                    <Text style={styles.revenueValue}>{s.totalDeliveries || 0}</Text>
+                  </View>
+                  <View style={styles.revenueIconWrap}>
+                    <Ionicons name="car" size={22} color={colors.primary[800]} />
+                  </View>
+                </View>
+                <View style={styles.revenueDivider} />
+                <View style={styles.revenueFooter}>
+                  <View style={styles.revenueFooterItem}>
+                    <Ionicons name="flash" size={14} color={colors.primary[300]} />
+                    <Text style={styles.revenueFooterText}>{s.activeJobs || 0} {t('active_now')}</Text>
+                  </View>
+                  {(s.rating ?? 0) > 0 && (
+                    <>
+                      <View style={styles.revenueFooterDot} />
+                      <View style={styles.revenueFooterItem}>
+                        <Ionicons name="star" size={14} color={colors.accent[400]} />
+                        <Text style={styles.revenueFooterText}>{s.rating?.toFixed(1)}</Text>
+                      </View>
+                    </>
+                  )}
                 </View>
               </View>
               <View style={styles.statsRow}>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.semantic.warningLight }]}>
+                    <Ionicons name="navigate-outline" size={18} color={colors.semantic.warning} />
+                  </View>
                   <Text style={styles.statValue}>{s.activeJobs || 0}</Text>
-                  <Text style={styles.statLabel}>Active</Text>
-                  <Text style={styles.statSubHighlight}>jobs</Text>
+                  <Text style={styles.statLabel}>{t('active')}</Text>
                 </View>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.semantic.successLight }]}>
+                    <Ionicons name="checkmark-done-outline" size={18} color={colors.semantic.success} />
+                  </View>
                   <Text style={styles.statValue}>{s.totalDeliveries || 0}</Text>
-                  <Text style={styles.statLabel}>Done</Text>
-                  <Text style={styles.statSub}>deliveries</Text>
+                  <Text style={styles.statLabel}>{t('done')}</Text>
                 </View>
                 <View style={styles.statCard}>
+                  <View style={[styles.statIconWrap, { backgroundColor: colors.accent[50] }]}>
+                    <Ionicons name="star" size={18} color={colors.accent[600]} />
+                  </View>
                   <Text style={styles.statValue}>{s.rating?.toFixed(1) || '-'}</Text>
-                  <Text style={styles.statLabel}>Rating</Text>
-                  <Text style={styles.statSub}>{s.totalRatings} reviews</Text>
+                  <Text style={styles.statLabel}>{s.totalRatings} {t('reviews')}</Text>
                 </View>
               </View>
             </>
@@ -339,9 +458,13 @@ export default function DashboardScreen() {
             </View>
             <Text style={styles.sectionTitleNoMargin}>{t('ai_insights')}</Text>
           </View>
-          <TouchableOpacity onPress={() => router.push('/intelligence')} style={styles.seeAllBtn}>
-            <Text style={styles.seeAll}>See all</Text>
-            <Ionicons name="chevron-forward" size={14} color="#2E7D32" />
+          <TouchableOpacity
+            onPress={() => router.push('/intelligence')}
+            style={styles.seeAllBtn}
+            accessibilityLabel={`${t('see_all')} ${t('ai_insights')}`}
+          >
+            <Text style={styles.seeAll}>{t('see_all')}</Text>
+            <Ionicons name="chevron-forward" size={14} color={colors.primary[800]} />
           </TouchableOpacity>
         </View>
         {insights.map((insight: any, index) => (
@@ -350,6 +473,7 @@ export default function DashboardScreen() {
             style={styles.insightCard}
             onPress={() => handleInsightAction(insight.action, insight.actionData)}
             activeOpacity={insight.action ? 0.7 : 1}
+            accessibilityLabel={`${insight.title}: ${insight.message}`}
           >
             <View style={[styles.insightIcon, { backgroundColor: insight.color + '20' }]}>
               <Ionicons name={insight.icon as any} size={20} color={insight.color} />
@@ -361,7 +485,7 @@ export default function DashboardScreen() {
             {insight.action && (
               <View style={styles.insightAction}>
                 <Text style={styles.insightActionText}>{insight.action}</Text>
-                <Ionicons name="chevron-forward" size={16} color="#2E7D32" />
+                <Ionicons name="chevron-forward" size={16} color={colors.primary[800]} />
               </View>
             )}
           </TouchableOpacity>
@@ -372,86 +496,167 @@ export default function DashboardScreen() {
       {/* Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{t('quick_actions')}</Text>
-        <View style={styles.quickActions}>
-          {isFarmer && (
-            <>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/sell')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#E8F5E9' }]}>
-                  <Ionicons name="add-circle" size={24} color="#2E7D32" />
+
+        {isFarmer && (
+          <>
+            {/* Primary CTA: Sell — with Grade built in */}
+            <TouchableOpacity
+              style={styles.primaryAction}
+              onPress={() => router.push('/sell')}
+              activeOpacity={0.8}
+              accessibilityLabel={t('sell_produce')}
+            >
+              <View style={styles.primaryActionLeft}>
+                <View style={styles.primaryActionIconWrap}>
+                  <Ionicons name="add-circle" size={28} color={colors.background.primary} />
                 </View>
-                <Text style={styles.quickActionText}>{t('sell')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/grade')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#E3F2FD' }]}>
-                  <Ionicons name="camera" size={24} color="#1976D2" />
+                <View>
+                  <Text style={styles.primaryActionTitle}>{t('sell_produce')}</Text>
+                  <Text style={styles.primaryActionSub}>{t('grade_and_list')}</Text>
                 </View>
-                <Text style={styles.quickActionText}>AI Grade</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.background.primary} />
+            </TouchableOpacity>
+
+            {/* Secondary row */}
+            <View style={styles.quickActions}>
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/grade')}
+                accessibilityLabel={t('ai_grade')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[50] }]}>
+                  <Ionicons name="camera" size={24} color={colors.accent[700]} />
+                </View>
+                <Text style={styles.quickActionText}>{t('ai_grade')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/intelligence')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#F3E5F5' }]}>
-                  <Ionicons name="analytics" size={24} color="#9C27B0" />
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/intelligence')}
+                accessibilityLabel={t('ai_prices')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[100] }]}>
+                  <Ionicons name="analytics" size={24} color={colors.accent[500]} />
                 </View>
                 <Text style={styles.quickActionText}>{t('ai_prices')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/orders')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#FFF3E0' }]}>
-                  <Ionicons name="receipt" size={24} color="#F57C00" />
-                </View>
-                <Text style={styles.quickActionText}>{t('orders')}</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          {isBuyer && (
-            <>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/market')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#E8F5E9' }]}>
-                  <Ionicons name="search" size={24} color="#2E7D32" />
-                </View>
-                <Text style={styles.quickActionText}>{t('browse_market')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/intelligence')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#F3E5F5' }]}>
-                  <Ionicons name="analytics" size={24} color="#9C27B0" />
-                </View>
-                <Text style={styles.quickActionText}>{t('ai_prices')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/orders')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#FFF3E0' }]}>
-                  <Ionicons name="receipt" size={24} color="#F57C00" />
-                </View>
-                <Text style={styles.quickActionText}>{t('orders')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/sacco')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#E3F2FD' }]}>
-                  <Ionicons name="wallet" size={24} color="#1976D2" />
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/sacco')}
+                accessibilityLabel={t('sacco')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[50] }]}>
+                  <Ionicons name="wallet" size={24} color={colors.accent[700]} />
                 </View>
                 <Text style={styles.quickActionText}>{t('sacco')}</Text>
               </TouchableOpacity>
-            </>
-          )}
-          {isTransporter && (
-            <>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/deliveries')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#E8F5E9' }]}>
-                  <Ionicons name="car" size={24} color="#2E7D32" />
+            </View>
+          </>
+        )}
+
+        {isBuyer && (
+          <>
+            {/* Primary CTA: Browse Market */}
+            <TouchableOpacity
+              style={styles.primaryAction}
+              onPress={() => router.push('/market')}
+              activeOpacity={0.8}
+              accessibilityLabel={t('browse_market')}
+            >
+              <View style={styles.primaryActionLeft}>
+                <View style={styles.primaryActionIconWrap}>
+                  <Ionicons name="search" size={28} color={colors.background.primary} />
                 </View>
-                <Text style={styles.quickActionText}>{t('available_jobs')}</Text>
+                <View>
+                  <Text style={styles.primaryActionTitle}>{t('browse_market')}</Text>
+                  <Text style={styles.primaryActionSub}>{t('find_fresh_produce')}</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.background.primary} />
+            </TouchableOpacity>
+
+            {/* Secondary row */}
+            <View style={styles.quickActions}>
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/intelligence')}
+                accessibilityLabel={t('ai_prices')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[100] }]}>
+                  <Ionicons name="analytics" size={24} color={colors.accent[500]} />
+                </View>
+                <Text style={styles.quickActionText}>{t('ai_prices')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/orders')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#FFF3E0' }]}>
-                  <Ionicons name="map" size={24} color="#F57C00" />
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/orders')}
+                accessibilityLabel={t('orders')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[200] }]}>
+                  <Ionicons name="receipt" size={24} color={colors.semantic.warning} />
+                </View>
+                <Text style={styles.quickActionText}>{t('orders')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/sacco')}
+                accessibilityLabel={t('sacco')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[50] }]}>
+                  <Ionicons name="wallet" size={24} color={colors.accent[700]} />
+                </View>
+                <Text style={styles.quickActionText}>{t('sacco')}</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {isTransporter && (
+          <>
+            {/* Primary CTA: Find Jobs */}
+            <TouchableOpacity
+              style={styles.primaryAction}
+              onPress={() => router.push('/deliveries')}
+              activeOpacity={0.8}
+              accessibilityLabel={t('available_jobs')}
+            >
+              <View style={styles.primaryActionLeft}>
+                <View style={styles.primaryActionIconWrap}>
+                  <Ionicons name="car" size={28} color={colors.background.primary} />
+                </View>
+                <View>
+                  <Text style={styles.primaryActionTitle}>{t('available_jobs')}</Text>
+                  <Text style={styles.primaryActionSub}>{t('find_deliveries')}</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.background.primary} />
+            </TouchableOpacity>
+
+            {/* Secondary row */}
+            <View style={styles.quickActions}>
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/orders')}
+                accessibilityLabel={t('active')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[200] }]}>
+                  <Ionicons name="map" size={24} color={colors.semantic.warning} />
                 </View>
                 <Text style={styles.quickActionText}>{t('active')}</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/sacco')}>
-                <View style={[styles.quickActionIcon, { backgroundColor: '#E3F2FD' }]}>
-                  <Ionicons name="wallet" size={24} color="#1976D2" />
+              <TouchableOpacity
+                style={styles.quickAction}
+                onPress={() => router.push('/sacco')}
+                accessibilityLabel={t('sacco')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: colors.accent[50] }]}>
+                  <Ionicons name="wallet" size={24} color={colors.accent[700]} />
                 </View>
                 <Text style={styles.quickActionText}>{t('sacco')}</Text>
               </TouchableOpacity>
-            </>
-          )}
-        </View>
+            </View>
+          </>
+        )}
       </View>
 
       {/* Market Prices - with real trend data */}
@@ -459,20 +664,25 @@ export default function DashboardScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitleNoMargin}>{t('market_prices')}</Text>
-            <TouchableOpacity onPress={() => router.push('/intelligence')} style={styles.seeAllBtn}>
+            <TouchableOpacity
+              onPress={() => router.push('/intelligence')}
+              style={styles.seeAllBtn}
+              accessibilityLabel={`${t('see_all')} ${t('market_prices')}`}
+            >
               <Text style={styles.seeAll}>{t('view_trends')}</Text>
-              <Ionicons name="chevron-forward" size={14} color="#2E7D32" />
+              <Ionicons name="chevron-forward" size={14} color={colors.primary[800]} />
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             {intelligence.crops.slice(0, 5).map((crop, index) => {
               const trendIcon = crop.trend === 'rising' ? 'trending-up' : crop.trend === 'falling' ? 'trending-down' : 'remove';
-              const trendColor = crop.trend === 'rising' ? '#4CAF50' : crop.trend === 'falling' ? '#F44336' : '#9E9E9E';
+              const trendColor = crop.trend === 'rising' ? colors.semantic.success : crop.trend === 'falling' ? colors.semantic.error : colors.neutral[500];
               return (
                 <TouchableOpacity
                   key={index}
                   style={styles.priceCard}
                   onPress={() => router.push('/intelligence')}
+                  accessibilityLabel={`${crop.crop} KSh ${crop.price} ${t('per_kg')} ${crop.changePercent > 0 ? '+' : ''}${crop.changePercent}%`}
                 >
                   <Text style={styles.priceCrop}>{crop.crop}</Text>
                   <Text style={styles.priceValue}>KSh {crop.price}</Text>
@@ -498,249 +708,322 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background.secondary,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingHorizontal: spacing[5],
+    paddingTop: spacing[5],
+    paddingBottom: spacing[4],
   },
   greeting: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: fontSize.sm,
+    color: colors.text.secondary,
   },
   userName: {
-    fontSize: 24,
+    fontSize: fontSize.xl,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   notificationBtn: {
     position: 'relative',
-    padding: 8,
+    padding: spacing[2],
   },
   notificationBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: '#F44336',
-    borderRadius: 10,
+    top: spacing[1],
+    right: spacing[1],
+    backgroundColor: colors.semantic.error,
+    borderRadius: radius.full,
     minWidth: 18,
     height: 18,
     justifyContent: 'center',
     alignItems: 'center',
   },
   notificationBadgeText: {
-    color: '#fff',
-    fontSize: 10,
+    color: colors.background.primary,
+    fontSize: fontSize.xs,
     fontWeight: '700',
   },
   statsContainer: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingHorizontal: spacing[5],
+    marginBottom: spacing[5],
   },
   statCardPrimary: {
-    backgroundColor: '#2E7D32',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 12,
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.xl,
+    padding: spacing[5],
+    marginBottom: spacing[3],
+    ...shadows.md,
+    overflow: 'hidden',
   },
-  statValueLarge: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#fff',
-    marginVertical: 4,
+  revenueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
-  statChange: {
+  revenueLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.primary[200],
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  revenueValue: {
+    fontSize: 34,
+    fontWeight: '800',
+    color: colors.background.primary,
+    marginTop: spacing[1],
+    letterSpacing: -0.5,
+  },
+  revenueIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  revenueDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginVertical: spacing[3.5],
+  },
+  revenueFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
   },
-  statChangeText: {
+  revenueFooterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+  },
+  revenueFooterText: {
     fontSize: 13,
-    color: '#A5D6A7',
+    color: colors.primary[100],
+    fontWeight: '500',
+  },
+  revenueFooterDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    marginHorizontal: spacing[2],
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: spacing[2.5],
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: colors.background.primary,
+    borderRadius: radius.xl,
+    paddingVertical: spacing[4],
+    paddingHorizontal: spacing[2],
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8F5E9',
+    borderColor: colors.neutral[200],
+    ...shadows.sm,
+  },
+  statIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing[2],
   },
   statValue: {
-    fontSize: 24,
+    fontSize: fontSize.xl,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  statSub: {
-    fontSize: 10,
-    color: '#9E9E9E',
-    marginTop: 2,
-  },
-  statSubHighlight: {
-    fontSize: 10,
-    color: '#F57C00',
-    fontWeight: '600',
-    marginTop: 2,
+    fontSize: 11,
+    color: colors.text.secondary,
+    marginTop: spacing[0.5],
+    textAlign: 'center',
   },
   section: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    paddingHorizontal: spacing[5],
+    marginBottom: spacing[5],
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    ...typography.heading4,
+    color: colors.text.primary,
+    marginBottom: spacing[3],
   },
   sectionTitleNoMargin: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    ...typography.heading4,
+    color: colors.text.primary,
   },
   aiTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing[2],
   },
   aiBadgeSmall: {
-    backgroundColor: '#9C27B0',
-    paddingHorizontal: 8,
+    backgroundColor: colors.accent[500],
+    paddingHorizontal: spacing[2],
     paddingVertical: 3,
-    borderRadius: 6,
+    borderRadius: radius.md,
   },
   aiBadgeText: {
-    color: '#fff',
-    fontSize: 11,
+    color: colors.background.primary,
+    fontSize: fontSize.xs,
     fontWeight: '700',
   },
   seeAllBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: spacing[0.5],
   },
   seeAll: {
-    fontSize: 14,
+    fontSize: fontSize.sm,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   insightCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    backgroundColor: colors.background.primary,
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
+    marginBottom: spacing[2.5],
     borderWidth: 1,
-    borderColor: '#E8F5E9',
+    borderColor: colors.primary[50],
+    ...shadows.xs,
   },
   insightIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: spacing[10],
+    height: spacing[10],
+    borderRadius: spacing[5],
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: spacing[3],
   },
   insightContent: {
     flex: 1,
   },
   insightTitle: {
-    fontSize: 14,
+    fontSize: fontSize.sm,
     fontWeight: '600',
-    color: '#333',
+    color: colors.text.primary,
   },
   insightMessage: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
+    fontSize: fontSize.xs,
+    color: colors.text.secondary,
+    marginTop: spacing[0.5],
   },
   insightAction: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   insightActionText: {
-    fontSize: 12,
+    fontSize: fontSize.xs,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
+  },
+  primaryAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    marginBottom: spacing[4],
+    ...shadows.md,
+  },
+  primaryActionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+  },
+  primaryActionIconWrap: {
+    width: spacing[12],
+    height: spacing[12],
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary[600],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  primaryActionTitle: {
+    fontSize: fontSize.base,
+    fontWeight: '700',
+    color: colors.background.primary,
+  },
+  primaryActionSub: {
+    fontSize: fontSize.xs,
+    color: colors.primary[200],
+    marginTop: 2,
   },
   quickActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing[3],
   },
   quickAction: {
     flex: 1,
     alignItems: 'center',
-    gap: 8,
+    gap: spacing[2],
   },
   quickActionIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
+    width: spacing[14],
+    height: spacing[14],
+    borderRadius: radius.xl,
     justifyContent: 'center',
     alignItems: 'center',
   },
   quickActionText: {
-    fontSize: 12,
+    fontSize: fontSize.xs,
     fontWeight: '500',
-    color: '#333',
+    color: colors.text.primary,
   },
   priceCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginRight: 10,
+    backgroundColor: colors.background.primary,
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
+    marginRight: spacing[2.5],
     minWidth: 100,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E8F5E9',
+    borderColor: colors.primary[50],
+    ...shadows.xs,
   },
   priceCrop: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: fontSize.xs,
+    color: colors.text.secondary,
     textTransform: 'capitalize',
   },
   priceValue: {
-    fontSize: 18,
+    fontSize: fontSize.lg,
     fontWeight: '700',
-    color: '#1B5E20',
-    marginTop: 4,
+    color: colors.primary[900],
+    marginTop: spacing[1],
   },
   priceUnit: {
-    fontSize: 10,
-    color: '#9E9E9E',
+    fontSize: fontSize.xs,
+    color: colors.neutral[500],
   },
   priceChange: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    marginTop: 4,
+    gap: spacing[0.5],
+    marginTop: spacing[1],
   },
   priceChangeText: {
-    fontSize: 10,
-    color: '#4CAF50',
+    fontSize: fontSize.xs,
+    color: colors.primary[500],
     fontWeight: '600',
   },
   bottomPadding: {
-    height: 20,
+    height: spacing[5],
   },
 });

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -9,11 +8,16 @@ import {
   Image,
   Alert,
   Modal,
-  TextInput,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Text } from '../components/primitives/Text';
+import { Input } from '../components/primitives/Input';
+import { Button } from '../components/primitives/Button';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { useToast } from '../context/ToastContext';
+import { colors, spacing, radius, shadows } from '@/theme';
 import {
   getAvailableDeliveries, getMyDeliveries, acceptDelivery, completeDelivery,
   AvailableDelivery, MyDelivery,
@@ -42,12 +46,12 @@ interface DeliveryJob {
 }
 
 const STATUS_CONFIG: Record<DeliveryStatus, { label: string; color: string; icon: string }> = {
-  available: { label: 'Available', color: '#2E7D32', icon: 'radio-button-on' },
-  accepted: { label: 'Accepted', color: '#1976D2', icon: 'checkmark-circle' },
+  available: { label: 'Available', color: colors.primary[800], icon: 'radio-button-on' },
+  accepted: { label: 'Accepted', color: colors.semantic.info, icon: 'checkmark-circle' },
   picked_up: { label: 'Picked Up', color: '#7B1FA2', icon: 'cube' },
   in_transit: { label: 'In Transit', color: '#F57C00', icon: 'car' },
   delivered: { label: 'Delivered', color: '#00897B', icon: 'location' },
-  completed: { label: 'Completed', color: '#388E3C', icon: 'checkmark-done-circle' },
+  completed: { label: 'Completed', color: colors.primary[700], icon: 'checkmark-done-circle' },
 };
 
 // Helper to map API data to the UI DeliveryJob shape
@@ -105,6 +109,8 @@ function mapMyDeliveryToJob(d: MyDelivery): DeliveryJob {
 
 export default function DeliveriesScreen() {
   const { user } = useAuth();
+  const { t } = useLanguage();
+  const { showToast } = useToast();
   const [jobs, setJobs] = useState<DeliveryJob[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -153,12 +159,12 @@ export default function DeliveriesScreen() {
 
   const acceptJob = (job: DeliveryJob) => {
     Alert.alert(
-      'Accept Job',
+      t('accept_job'),
       `Accept delivery of ${job.quantity}${job.unit} ${job.cropType} for KSh ${job.payment.toLocaleString()}?`,
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Accept',
+          text: t('accept_job'),
           onPress: async () => {
             try {
               await acceptDelivery(job.id, user?.id || '');
@@ -166,10 +172,10 @@ export default function DeliveriesScreen() {
                 j.id === job.id ? { ...j, status: 'accepted' as DeliveryStatus } : j
               ));
               setShowJobModal(false);
-              Alert.alert('Success', 'Job accepted! Contact the farmer to arrange pickup.');
+              showToast(`${t('job_accepted')} ${t('contact_farmer_pickup')}`, 'success');
             } catch (err: any) {
               const msg = err?.response?.data?.error?.message || 'Failed to accept job';
-              Alert.alert('Error', msg);
+              showToast(msg, 'error');
             }
           },
         },
@@ -180,7 +186,7 @@ export default function DeliveriesScreen() {
   const updateJobStatus = async (job: DeliveryJob, newStatus: DeliveryStatus) => {
     const statusMessages: Record<DeliveryStatus, string> = {
       available: '',
-      accepted: 'Job accepted',
+      accepted: t('job_accepted'),
       picked_up: 'Cargo picked up from farmer',
       in_transit: 'Delivery in progress',
       delivered: 'Cargo delivered to buyer',
@@ -193,7 +199,7 @@ export default function DeliveriesScreen() {
         await completeDelivery(job.id);
       } catch (err: any) {
         const msg = err?.response?.data?.error?.message || 'Failed to update status';
-        Alert.alert('Error', msg);
+        showToast(msg, 'error');
         return;
       }
     }
@@ -203,7 +209,7 @@ export default function DeliveriesScreen() {
     ));
     setShowUpdateModal(false);
     setSelectedJob(null);
-    Alert.alert('Status Updated', statusMessages[newStatus]);
+    showToast(statusMessages[newStatus], 'success');
   };
 
   const getNextStatus = (currentStatus: DeliveryStatus): DeliveryStatus | null => {
@@ -220,11 +226,11 @@ export default function DeliveriesScreen() {
 
   const getNextStatusLabel = (currentStatus: DeliveryStatus): string => {
     const labels: Record<DeliveryStatus, string> = {
-      available: 'Accept Job',
-      accepted: 'Mark as Picked Up',
-      picked_up: 'Start Delivery',
-      in_transit: 'Mark as Delivered',
-      delivered: 'Complete & Get Paid',
+      available: t('accept_job'),
+      accepted: t('mark_picked_up'),
+      picked_up: t('start_delivery'),
+      in_transit: t('delivered'),
+      delivered: t('complete_get_paid'),
       completed: '',
     };
     return labels[currentStatus];
@@ -241,6 +247,8 @@ export default function DeliveriesScreen() {
           setSelectedJob(job);
           setShowJobModal(true);
         }}
+        accessibilityLabel={`${job.cropType} ${t('delivery')} - ${job.quantity} ${job.unit}`}
+        accessibilityHint={`Tap to view details for ${job.cropType} delivery`}
       >
         <View style={styles.jobHeader}>
           <View style={styles.cropInfo}>
@@ -257,17 +265,17 @@ export default function DeliveriesScreen() {
 
         <View style={styles.routeContainer}>
           <View style={styles.routePoint}>
-            <View style={[styles.routeDot, { backgroundColor: '#2E7D32' }]} />
+            <View style={[styles.routeDot, { backgroundColor: colors.primary[800] }]} />
             <View style={styles.routeTextContainer}>
-              <Text style={styles.routeLabel}>Pickup</Text>
+              <Text style={styles.routeLabel}>{t('pickup')}</Text>
               <Text style={styles.routeLocation} numberOfLines={1}>{job.pickupLocation}</Text>
             </View>
           </View>
           <View style={styles.routeLine} />
           <View style={styles.routePoint}>
-            <View style={[styles.routeDot, { backgroundColor: '#D32F2F' }]} />
+            <View style={[styles.routeDot, { backgroundColor: colors.semantic.error }]} />
             <View style={styles.routeTextContainer}>
-              <Text style={styles.routeLabel}>Delivery</Text>
+              <Text style={styles.routeLabel}>{t('delivery')}</Text>
               <Text style={styles.routeLocation} numberOfLines={1}>{job.deliveryLocation}</Text>
             </View>
           </View>
@@ -275,12 +283,12 @@ export default function DeliveriesScreen() {
 
         <View style={styles.jobFooter}>
           <View style={styles.footerItem}>
-            <Ionicons name="navigate" size={16} color="#666" />
+            <Ionicons name="navigate" size={spacing[4]} color={colors.neutral[600]} />
             <Text style={styles.footerText}>{job.distance} km</Text>
           </View>
           <View style={styles.footerItem}>
-            <Ionicons name="time" size={16} color="#666" />
-            <Text style={styles.footerText}>By {job.deliveryDeadline.split(' ')[1]}</Text>
+            <Ionicons name="time" size={spacing[4]} color={colors.neutral[600]} />
+            <Text style={styles.footerText}>{t('deadline')} {job.deliveryDeadline.split(' ')[1]}</Text>
           </View>
           <View style={styles.paymentBadge}>
             <Text style={styles.paymentText}>KSh {job.payment.toLocaleString()}</Text>
@@ -288,17 +296,20 @@ export default function DeliveriesScreen() {
         </View>
 
         {showActions && job.status !== 'available' && job.status !== 'completed' && (
-          <TouchableOpacity
-            style={styles.updateButton}
-            onPress={(e) => {
-              e.stopPropagation();
+          <Button
+            variant="primary"
+            size="medium"
+            fullWidth
+            onPress={() => {
               setSelectedJob(job);
               setShowUpdateModal(true);
             }}
+            accessibilityLabel={getNextStatusLabel(job.status)}
+            rightIcon={<Ionicons name="arrow-forward" size={spacing[4]} color={colors.neutral[0]} />}
+            style={styles.updateButton}
           >
-            <Text style={styles.updateButtonText}>{getNextStatusLabel(job.status)}</Text>
-            <Ionicons name="arrow-forward" size={16} color="#fff" />
-          </TouchableOpacity>
+            {getNextStatusLabel(job.status)}
+          </Button>
         )}
       </TouchableOpacity>
     );
@@ -310,17 +321,17 @@ export default function DeliveriesScreen() {
       <View style={styles.statsHeader}>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>KSh {todayEarnings.toLocaleString()}</Text>
-          <Text style={styles.statLabel}>Today's Earnings</Text>
+          <Text style={styles.statLabel}>{t('todays_earnings')}</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{activeDeliveries}</Text>
-          <Text style={styles.statLabel}>Active Jobs</Text>
+          <Text style={styles.statLabel}>{t('active_jobs')}</Text>
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{completedToday}</Text>
-          <Text style={styles.statLabel}>Completed</Text>
+          <Text style={styles.statLabel}>{t('completed')}</Text>
         </View>
       </View>
 
@@ -329,17 +340,23 @@ export default function DeliveriesScreen() {
         <TouchableOpacity
           style={[styles.tab, activeTab === 'available' && styles.activeTab]}
           onPress={() => setActiveTab('available')}
+          accessibilityLabel={`${t('available_jobs')} (${availableJobs.length})`}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'available' }}
         >
           <Text style={[styles.tabText, activeTab === 'available' && styles.activeTabText]}>
-            Available ({availableJobs.length})
+            {t('available_jobs')} ({availableJobs.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, activeTab === 'my_jobs' && styles.activeTab]}
           onPress={() => setActiveTab('my_jobs')}
+          accessibilityLabel={`${t('my_jobs')} (${myJobs.length})`}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: activeTab === 'my_jobs' }}
         >
           <Text style={[styles.tabText, activeTab === 'my_jobs' && styles.activeTabText]}>
-            My Jobs ({myJobs.length})
+            {t('my_jobs')} ({myJobs.length})
           </Text>
         </TouchableOpacity>
       </View>
@@ -351,18 +368,18 @@ export default function DeliveriesScreen() {
       >
         {loading ? (
           <View style={styles.emptyState}>
-            <ActivityIndicator size="large" color="#2E7D32" />
-            <Text style={styles.emptyText}>Loading deliveries...</Text>
+            <ActivityIndicator size="large" color={colors.primary[800]} />
+            <Text style={styles.emptyText}>{t('loading')}</Text>
           </View>
         ) : activeTab === 'available' ? (
           availableJobs.length > 0 ? (
             availableJobs.map(job => renderJobCard(job, false))
           ) : (
             <View style={styles.emptyState}>
-              <Ionicons name="car-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyTitle}>No Available Jobs</Text>
+              <Ionicons name="car-outline" size={64} color={colors.neutral[300]} />
+              <Text style={styles.emptyTitle}>{t('no_available_jobs')}</Text>
               <Text style={styles.emptyText}>
-                New delivery jobs will appear here. Pull down to refresh.
+                {t('pull_to_refresh')}
               </Text>
             </View>
           )
@@ -371,10 +388,10 @@ export default function DeliveriesScreen() {
             myJobs.map(job => renderJobCard(job, true))
           ) : (
             <View style={styles.emptyState}>
-              <Ionicons name="briefcase-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyTitle}>No Active Jobs</Text>
+              <Ionicons name="briefcase-outline" size={64} color={colors.neutral[300]} />
+              <Text style={styles.emptyTitle}>{t('no_active_jobs')}</Text>
               <Text style={styles.emptyText}>
-                Accept a job from the Available tab to get started.
+                {t('no_active_jobs')}
               </Text>
             </View>
           )
@@ -384,15 +401,19 @@ export default function DeliveriesScreen() {
         {myJobs.length > 1 && (
           <View style={styles.aiTipCard}>
             <View style={styles.aiTipHeader}>
-              <Ionicons name="bulb" size={20} color="#F57C00" />
-              <Text style={styles.aiTipTitle}>AI Route Suggestion</Text>
+              <Ionicons name="bulb" size={spacing[5]} color={colors.semantic.warning} />
+              <Text style={styles.aiTipTitle}>{t('ai_route_suggestion')}</Text>
             </View>
             <Text style={styles.aiTipText}>
               Optimize your route: Deliver to Githurai first, then Muthurwa Market.
               This saves 12km and 25 minutes of travel time.
             </Text>
-            <TouchableOpacity style={styles.aiTipButton}>
-              <Text style={styles.aiTipButtonText}>View Optimized Route</Text>
+            <TouchableOpacity
+              style={styles.aiTipButton}
+              accessibilityLabel={t('optimized_route')}
+              accessibilityRole="button"
+            >
+              <Text style={styles.aiTipButtonText}>{t('optimized_route')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -410,30 +431,34 @@ export default function DeliveriesScreen() {
         {selectedJob && (
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Job Details</Text>
-              <TouchableOpacity onPress={() => setShowJobModal(false)}>
-                <Ionicons name="close" size={24} color="#333" />
+              <Text style={styles.modalTitle}>{t('cargo_info')}</Text>
+              <TouchableOpacity
+                onPress={() => setShowJobModal(false)}
+                accessibilityLabel={t('close')}
+                accessibilityRole="button"
+              >
+                <Ionicons name="close" size={spacing[6]} color={colors.neutral[900]} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={styles.modalContent}>
               {/* Cargo Info */}
               <View style={styles.modalSection}>
-                <Text style={styles.sectionTitle}>Cargo Information</Text>
+                <Text style={styles.sectionTitle}>{t('cargo_information')}</Text>
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Crop Type</Text>
+                  <Text style={styles.infoLabel}>{t('crop_type_label')}</Text>
                   <Text style={styles.infoValue}>{selectedJob.cropType}</Text>
                 </View>
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Quantity</Text>
+                  <Text style={styles.infoLabel}>{t('quantity')}</Text>
                   <Text style={styles.infoValue}>{selectedJob.quantity} {selectedJob.unit}</Text>
                 </View>
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Distance</Text>
+                  <Text style={styles.infoLabel}>{t('distance')}</Text>
                   <Text style={styles.infoValue}>{selectedJob.distance} km</Text>
                 </View>
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Payment</Text>
+                  <Text style={styles.infoLabel}>{t('payment')}</Text>
                   <Text style={[styles.infoValue, styles.paymentValue]}>
                     KSh {selectedJob.payment.toLocaleString()}
                   </Text>
@@ -442,29 +467,29 @@ export default function DeliveriesScreen() {
 
               {/* Route Info */}
               <View style={styles.modalSection}>
-                <Text style={styles.sectionTitle}>Route</Text>
+                <Text style={styles.sectionTitle}>{t('route')}</Text>
                 <View style={styles.fullRouteContainer}>
                   <View style={styles.fullRoutePoint}>
-                    <View style={[styles.fullRouteDot, { backgroundColor: '#2E7D32' }]}>
-                      <Ionicons name="arrow-up" size={14} color="#fff" />
+                    <View style={[styles.fullRouteDot, { backgroundColor: colors.primary[800] }]}>
+                      <Ionicons name="arrow-up" size={14} color={colors.neutral[0]} />
                     </View>
                     <View style={styles.fullRouteInfo}>
-                      <Text style={styles.fullRouteLabel}>Pickup Location</Text>
+                      <Text style={styles.fullRouteLabel}>{t('pickup')}</Text>
                       <Text style={styles.fullRouteAddress}>{selectedJob.pickupLocation}</Text>
                       {selectedJob.pickupTime && (
-                        <Text style={styles.fullRouteTime}>Pickup: {selectedJob.pickupTime}</Text>
+                        <Text style={styles.fullRouteTime}>{t('pickup')}: {selectedJob.pickupTime}</Text>
                       )}
                     </View>
                   </View>
                   <View style={styles.fullRouteLine} />
                   <View style={styles.fullRoutePoint}>
-                    <View style={[styles.fullRouteDot, { backgroundColor: '#D32F2F' }]}>
-                      <Ionicons name="arrow-down" size={14} color="#fff" />
+                    <View style={[styles.fullRouteDot, { backgroundColor: colors.semantic.error }]}>
+                      <Ionicons name="arrow-down" size={14} color={colors.neutral[0]} />
                     </View>
                     <View style={styles.fullRouteInfo}>
-                      <Text style={styles.fullRouteLabel}>Delivery Location</Text>
+                      <Text style={styles.fullRouteLabel}>{t('delivery')}</Text>
                       <Text style={styles.fullRouteAddress}>{selectedJob.deliveryLocation}</Text>
-                      <Text style={styles.fullRouteTime}>Deadline: {selectedJob.deliveryDeadline}</Text>
+                      <Text style={styles.fullRouteTime}>{t('deadline')}: {selectedJob.deliveryDeadline}</Text>
                     </View>
                   </View>
                 </View>
@@ -472,23 +497,31 @@ export default function DeliveriesScreen() {
 
               {/* Contact Info */}
               <View style={styles.modalSection}>
-                <Text style={styles.sectionTitle}>Contacts</Text>
+                <Text style={styles.sectionTitle}>{t('contacts')}</Text>
                 <View style={styles.contactCard}>
                   <View style={styles.contactInfo}>
-                    <Text style={styles.contactRole}>Farmer</Text>
+                    <Text style={styles.contactRole}>{t('farmer')}</Text>
                     <Text style={styles.contactName}>{selectedJob.farmerName}</Text>
                   </View>
-                  <TouchableOpacity style={styles.callButton}>
-                    <Ionicons name="call" size={20} color="#2E7D32" />
+                  <TouchableOpacity
+                    style={styles.callButton}
+                    accessibilityLabel={`${t('call')} ${selectedJob.farmerName}`}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="call" size={spacing[5]} color={colors.primary[800]} />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.contactCard}>
                   <View style={styles.contactInfo}>
-                    <Text style={styles.contactRole}>Buyer</Text>
+                    <Text style={styles.contactRole}>{t('buyer')}</Text>
                     <Text style={styles.contactName}>{selectedJob.buyerName}</Text>
                   </View>
-                  <TouchableOpacity style={styles.callButton}>
-                    <Ionicons name="call" size={20} color="#2E7D32" />
+                  <TouchableOpacity
+                    style={styles.callButton}
+                    accessibilityLabel={`${t('call')} ${selectedJob.buyerName}`}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="call" size={spacing[5]} color={colors.primary[800]} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -496,9 +529,9 @@ export default function DeliveriesScreen() {
               {/* Special Instructions */}
               {selectedJob.specialInstructions && (
                 <View style={styles.modalSection}>
-                  <Text style={styles.sectionTitle}>Special Instructions</Text>
+                  <Text style={styles.sectionTitle}>{t('special_instructions')}</Text>
                   <View style={styles.instructionsBox}>
-                    <Ionicons name="warning" size={20} color="#F57C00" />
+                    <Ionicons name="warning" size={spacing[5]} color={colors.semantic.warning} />
                     <Text style={styles.instructionsText}>{selectedJob.specialInstructions}</Text>
                   </View>
                 </View>
@@ -508,13 +541,17 @@ export default function DeliveriesScreen() {
             {/* Action Button */}
             {selectedJob.status === 'available' && (
               <View style={styles.modalFooter}>
-                <TouchableOpacity
-                  style={styles.acceptButton}
+                <Button
+                  variant="primary"
+                  size="large"
+                  fullWidth
                   onPress={() => acceptJob(selectedJob)}
+                  accessibilityLabel={t('accept_job')}
+                  leftIcon={<Ionicons name="checkmark-circle" size={spacing[6]} color={colors.neutral[0]} />}
+                  style={styles.acceptButton}
                 >
-                  <Ionicons name="checkmark-circle" size={24} color="#fff" />
-                  <Text style={styles.acceptButtonText}>Accept Job</Text>
-                </TouchableOpacity>
+                  {t('accept_job')}
+                </Button>
               </View>
             )}
           </View>
@@ -530,7 +567,7 @@ export default function DeliveriesScreen() {
       >
         <View style={styles.updateModalOverlay}>
           <View style={styles.updateModalContent}>
-            <Text style={styles.updateModalTitle}>Update Delivery Status</Text>
+            <Text style={styles.updateModalTitle}>{t('update_status')}</Text>
 
             {selectedJob && (
               <>
@@ -549,19 +586,19 @@ export default function DeliveriesScreen() {
                       <View key={status} style={styles.statusFlowItem}>
                         <View style={[
                           styles.statusFlowDot,
-                          { backgroundColor: isPast ? '#2E7D32' : isActive ? config.color : '#E0E0E0' }
+                          { backgroundColor: isPast ? colors.primary[800] : isActive ? config.color : colors.border.light }
                         ]}>
-                          {isPast && <Ionicons name="checkmark" size={12} color="#fff" />}
+                          {isPast && <Ionicons name="checkmark" size={spacing[3]} color={colors.neutral[0]} />}
                         </View>
                         <Text style={[
                           styles.statusFlowLabel,
-                          { color: isActive ? config.color : isPast ? '#2E7D32' : '#999' }
+                          { color: isActive ? config.color : isPast ? colors.primary[800] : colors.neutral[500] }
                         ]}>
                           {config.label}
                         </Text>
                         {index < 4 && <View style={[
                           styles.statusFlowLine,
-                          { backgroundColor: isPast ? '#2E7D32' : '#E0E0E0' }
+                          { backgroundColor: isPast ? colors.primary[800] : colors.border.light }
                         ]} />}
                       </View>
                     );
@@ -570,38 +607,43 @@ export default function DeliveriesScreen() {
 
                 {selectedJob.status === 'delivered' && (
                   <View style={styles.noteInput}>
-                    <Text style={styles.noteLabel}>Delivery Note (Optional)</Text>
-                    <TextInput
-                      style={styles.noteTextInput}
-                      placeholder="Add any notes about the delivery..."
+                    <Input
+                      label={t('delivery_note')}
+                      placeholder={t('enter_delivery_note')}
                       value={deliveryNote}
                       onChangeText={setDeliveryNote}
                       multiline
+                      inputStyle={styles.noteTextInput}
+                      accessibilityLabel={t('delivery_note')}
                     />
                   </View>
                 )}
 
                 <View style={styles.updateModalActions}>
-                  <TouchableOpacity
-                    style={styles.cancelButton}
+                  <Button
+                    variant="outline"
+                    size="medium"
                     onPress={() => setShowUpdateModal(false)}
+                    accessibilityLabel={t('cancel')}
+                    style={styles.cancelButton}
                   >
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
+                    {t('cancel')}
+                  </Button>
                   {getNextStatus(selectedJob.status) && (
-                    <TouchableOpacity
-                      style={styles.confirmButton}
+                    <Button
+                      variant="primary"
+                      size="medium"
                       onPress={() => {
                         const nextStatus = getNextStatus(selectedJob.status);
                         if (nextStatus) {
                           updateJobStatus(selectedJob, nextStatus);
                         }
                       }}
+                      accessibilityLabel={getNextStatusLabel(selectedJob.status)}
+                      style={styles.confirmButton}
                     >
-                      <Text style={styles.confirmButtonText}>
-                        {getNextStatusLabel(selectedJob.status)}
-                      </Text>
-                    </TouchableOpacity>
+                      {getNextStatusLabel(selectedJob.status)}
+                    </Button>
                   )}
                 </View>
               </>
@@ -616,15 +658,15 @@ export default function DeliveriesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: colors.neutral[100],
   },
   statsHeader: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
+    backgroundColor: colors.neutral[0],
+    paddingVertical: spacing[4],
+    paddingHorizontal: spacing[3],
     borderBottomWidth: 1,
-    borderBottomColor: '#E8F5E9',
+    borderBottomColor: colors.primary[50],
   },
   statItem: {
     flex: 1,
@@ -633,62 +675,58 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   statLabel: {
     fontSize: 11,
-    color: '#666',
-    marginTop: 2,
+    color: colors.neutral[600],
+    marginTop: spacing[0.5],
   },
   statDivider: {
     width: 1,
-    backgroundColor: '#E0E0E0',
-    marginVertical: 4,
+    backgroundColor: colors.border.light,
+    marginVertical: spacing[1],
   },
   tabs: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    padding: 8,
-    gap: 8,
+    backgroundColor: colors.neutral[0],
+    padding: spacing[2],
+    gap: spacing[2],
   },
   tab: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: spacing[2.5],
     alignItems: 'center',
-    borderRadius: 8,
-    backgroundColor: '#F5F5F5',
+    borderRadius: radius.md,
+    backgroundColor: colors.neutral[100],
   },
   activeTab: {
-    backgroundColor: '#E8F5E9',
+    backgroundColor: colors.primary[50],
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: colors.neutral[600],
   },
   activeTabText: {
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   scrollView: {
     flex: 1,
-    padding: 16,
+    padding: spacing[4],
   },
   jobCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginBottom: spacing[3],
+    ...shadows.sm,
   },
   jobHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   cropInfo: {
     flex: 1,
@@ -696,217 +734,211 @@ const styles = StyleSheet.create({
   cropType: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#333',
+    color: colors.neutral[900],
   },
   quantity: {
     fontSize: 14,
-    color: '#666',
-    marginTop: 2,
+    color: colors.neutral[600],
+    marginTop: spacing[0.5],
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.lg,
+    gap: spacing[1],
   },
   statusText: {
     fontSize: 12,
     fontWeight: '600',
   },
   routeContainer: {
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   routePoint: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing[2.5],
   },
   routeDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: spacing[2.5],
+    height: spacing[2.5],
+    borderRadius: radius.full,
   },
   routeTextContainer: {
     flex: 1,
   },
   routeLabel: {
     fontSize: 11,
-    color: '#999',
+    color: colors.neutral[500],
     textTransform: 'uppercase',
   },
   routeLocation: {
     fontSize: 14,
-    color: '#333',
+    color: colors.neutral[900],
     fontWeight: '500',
   },
   routeLine: {
     width: 2,
-    height: 20,
-    backgroundColor: '#E0E0E0',
-    marginLeft: 4,
-    marginVertical: 2,
+    height: spacing[5],
+    backgroundColor: colors.border.light,
+    marginLeft: spacing[1],
+    marginVertical: spacing[0.5],
   },
   jobFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 12,
+    paddingTop: spacing[3],
     borderTopWidth: 1,
-    borderTopColor: '#F0F0F0',
-    gap: 16,
+    borderTopColor: colors.neutral[100],
+    gap: spacing[4],
   },
   footerItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: spacing[1],
   },
   footerText: {
     fontSize: 13,
-    color: '#666',
+    color: colors.neutral[600],
   },
   paymentBadge: {
     marginLeft: 'auto',
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    backgroundColor: colors.primary[50],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1.5],
+    borderRadius: radius.xl,
   },
   paymentText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   updateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2E7D32',
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: 8,
-    gap: 8,
+    marginTop: spacing[3],
+    borderRadius: radius.md,
   },
   updateButtonText: {
-    color: '#fff',
+    color: colors.neutral[0],
     fontSize: 14,
     fontWeight: '600',
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
+    paddingVertical: spacing[16],
   },
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333',
-    marginTop: 16,
+    color: colors.neutral[900],
+    marginTop: spacing[4],
   },
   emptyText: {
     fontSize: 14,
-    color: '#666',
+    color: colors.neutral[600],
     textAlign: 'center',
-    marginTop: 8,
-    paddingHorizontal: 40,
+    marginTop: spacing[2],
+    paddingHorizontal: spacing[10],
   },
   aiTipCard: {
-    backgroundColor: '#FFF8E1',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
+    backgroundColor: colors.accent[50],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginTop: spacing[2],
     borderLeftWidth: 4,
-    borderLeftColor: '#F57C00',
+    borderLeftColor: colors.semantic.warning,
   },
   aiTipHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    gap: spacing[2],
+    marginBottom: spacing[2],
   },
   aiTipTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#E65100',
+    color: colors.accent[900],
   },
   aiTipText: {
     fontSize: 13,
-    color: '#666',
+    color: colors.neutral[600],
     lineHeight: 18,
   },
   aiTipButton: {
-    marginTop: 12,
+    marginTop: spacing[3],
   },
   aiTipButtonText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#F57C00',
+    color: colors.semantic.warning,
   },
   // Modal styles
   modalContainer: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.neutral[0],
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
+    padding: spacing[4],
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: colors.border.light,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#333',
+    color: colors.neutral[900],
   },
   modalContent: {
     flex: 1,
-    padding: 16,
+    padding: spacing[4],
   },
   modalSection: {
-    marginBottom: 24,
+    marginBottom: spacing[6],
   },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#999',
+    color: colors.neutral[500],
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: spacing[2],
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: colors.neutral[100],
   },
   infoLabel: {
     fontSize: 14,
-    color: '#666',
+    color: colors.neutral[600],
   },
   infoValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: colors.neutral[900],
   },
   paymentValue: {
-    color: '#2E7D32',
+    color: colors.primary[800],
     fontSize: 16,
   },
   fullRouteContainer: {
-    backgroundColor: '#F9F9F9',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.background.secondary,
+    borderRadius: radius.lg,
+    padding: spacing[4],
   },
   fullRoutePoint: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing[3],
   },
   fullRouteDot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: spacing[7],
+    height: spacing[7],
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -915,134 +947,128 @@ const styles = StyleSheet.create({
   },
   fullRouteLabel: {
     fontSize: 12,
-    color: '#999',
+    color: colors.neutral[500],
     textTransform: 'uppercase',
   },
   fullRouteAddress: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
-    marginTop: 2,
+    color: colors.neutral[900],
+    marginTop: spacing[0.5],
   },
   fullRouteTime: {
     fontSize: 12,
-    color: '#666',
-    marginTop: 4,
+    color: colors.neutral[600],
+    marginTop: spacing[1],
   },
   fullRouteLine: {
     width: 2,
-    height: 24,
-    backgroundColor: '#E0E0E0',
+    height: spacing[6],
+    backgroundColor: colors.border.light,
     marginLeft: 13,
-    marginVertical: 4,
+    marginVertical: spacing[1],
   },
   contactCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#F9F9F9',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
+    backgroundColor: colors.background.secondary,
+    padding: spacing[3],
+    borderRadius: radius.md,
+    marginBottom: spacing[2],
   },
   contactInfo: {
     flex: 1,
   },
   contactRole: {
     fontSize: 12,
-    color: '#999',
+    color: colors.neutral[500],
   },
   contactName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: colors.neutral[900],
   },
   callButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#E8F5E9',
+    width: spacing[10],
+    height: spacing[10],
+    borderRadius: radius.full,
+    backgroundColor: colors.primary[50],
     alignItems: 'center',
     justifyContent: 'center',
   },
   instructionsBox: {
     flexDirection: 'row',
-    backgroundColor: '#FFF8E1',
-    padding: 12,
-    borderRadius: 8,
-    gap: 10,
+    backgroundColor: colors.accent[50],
+    padding: spacing[3],
+    borderRadius: radius.md,
+    gap: spacing[2.5],
     alignItems: 'flex-start',
   },
   instructionsText: {
     flex: 1,
     fontSize: 14,
-    color: '#666',
+    color: colors.neutral[600],
     lineHeight: 20,
   },
   modalFooter: {
-    padding: 16,
+    padding: spacing[4],
     borderTopWidth: 1,
-    borderTopColor: '#E0E0E0',
+    borderTopColor: colors.border.light,
   },
   acceptButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2E7D32',
-    paddingVertical: 16,
-    borderRadius: 12,
-    gap: 8,
+    borderRadius: radius.lg,
   },
   acceptButtonText: {
-    color: '#fff',
+    color: colors.neutral[0],
     fontSize: 16,
     fontWeight: '700',
   },
   // Update Modal
   updateModalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.overlay.dark,
     justifyContent: 'center',
-    padding: 20,
+    padding: spacing[5],
   },
   updateModalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.xl,
+    padding: spacing[5],
   },
   updateModalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#333',
+    color: colors.neutral[900],
     textAlign: 'center',
   },
   updateModalSubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: colors.neutral[600],
     textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 20,
+    marginTop: spacing[1],
+    marginBottom: spacing[5],
   },
   statusFlow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: spacing[5],
   },
   statusFlowItem: {
     alignItems: 'center',
     flex: 1,
   },
   statusFlowDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: spacing[6],
+    height: spacing[6],
+    borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
   statusFlowLabel: {
     fontSize: 10,
-    marginTop: 4,
+    marginTop: spacing[1],
     textAlign: 'center',
   },
   statusFlowLine: {
@@ -1054,50 +1080,20 @@ const styles = StyleSheet.create({
     zIndex: -1,
   },
   noteInput: {
-    marginBottom: 16,
-  },
-  noteLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#333',
-    marginBottom: 8,
+    marginBottom: spacing[4],
   },
   noteTextInput: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 14,
     minHeight: 80,
     textAlignVertical: 'top',
   },
   updateModalActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing[3],
   },
   cancelButton: {
     flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
   },
   confirmButton: {
     flex: 2,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 8,
-    backgroundColor: '#2E7D32',
-  },
-  confirmButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
   },
 });

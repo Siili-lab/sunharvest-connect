@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
@@ -12,7 +11,12 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Text } from '../components/primitives/Text';
+import { Button } from '../components/primitives/Button';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { colors, spacing, radius, shadows } from '@/theme';
 import {
   getBuyerOffers,
   getFarmerOffers,
@@ -35,6 +39,8 @@ type Order = {
   status: OrderStatus;
   buyerName?: string;
   farmerName?: string;
+  buyerId?: string;
+  farmerId?: string;
   buyerPhone?: string;
   farmerPhone?: string;
   location: string;
@@ -42,6 +48,7 @@ type Order = {
   escrowStatus: 'pending' | 'held' | 'released';
   grade: string;
   images?: string[];
+  hasRated?: boolean;
 };
 
 // Helper to convert API offer to local Order type
@@ -75,6 +82,8 @@ const offerToOrder = (offer: Offer, isFarmer: boolean): Order => {
     status,
     buyerName: isFarmer ? offer.buyer : undefined,
     farmerName: !isFarmer ? offer.farmer : undefined,
+    buyerId: offer.buyerId,
+    farmerId: offer.farmerId,
     buyerPhone: isFarmer ? offer.buyerPhone : undefined,
     farmerPhone: !isFarmer ? offer.farmerPhone : undefined,
     location: offer.location || 'Kenya',
@@ -85,24 +94,29 @@ const offerToOrder = (offer: Offer, isFarmer: boolean): Order => {
   };
 };
 
-const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bgColor: string; icon: string }> = {
-  pending: { label: 'Pending', color: '#F57C00', bgColor: '#FFF3E0', icon: 'time' },
-  accepted: { label: 'Accepted', color: '#1976D2', bgColor: '#E3F2FD', icon: 'checkmark-circle' },
-  paid: { label: 'Paid', color: '#7B1FA2', bgColor: '#F3E5F5', icon: 'card' },
-  in_transit: { label: 'In Transit', color: '#0097A7', bgColor: '#E0F7FA', icon: 'car' },
-  delivered: { label: 'Delivered', color: '#388E3C', bgColor: '#E8F5E9', icon: 'checkmark-done' },
-  completed: { label: 'Completed', color: '#2E7D32', bgColor: '#E8F5E9', icon: 'checkmark-done-circle' },
-  disputed: { label: 'Disputed', color: '#D32F2F', bgColor: '#FFEBEE', icon: 'alert-circle' },
+const STATUS_CONFIG: Record<OrderStatus, { labelKey: string; color: string; bgColor: string; icon: string }> = {
+  pending: { labelKey: 'pending', color: colors.semantic.warning, bgColor: colors.semantic.warningLight, icon: 'time' },
+  accepted: { labelKey: 'accepted', color: colors.semantic.info, bgColor: colors.semantic.infoLight, icon: 'checkmark-circle' },
+  paid: { labelKey: 'paid', color: '#7B1FA2', bgColor: '#F3E5F5', icon: 'card' },
+  in_transit: { labelKey: 'in_transit', color: '#0097A7', bgColor: '#E0F7FA', icon: 'car' },
+  delivered: { labelKey: 'delivered', color: colors.primary[700], bgColor: colors.primary[50], icon: 'checkmark-done' },
+  completed: { labelKey: 'completed', color: colors.primary[800], bgColor: colors.primary[50], icon: 'checkmark-done-circle' },
+  disputed: { labelKey: 'disputed', color: colors.semantic.error, bgColor: colors.semantic.errorLight, icon: 'alert-circle' },
 };
 
 export default function OrdersScreen() {
+  const router = useRouter();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [selectedTab, setSelectedTab] = useState<'active' | 'completed'>('active');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [ratingOrderId, setRatingOrderId] = useState<string | null>(null);
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [ratedOrders, setRatedOrders] = useState<Set<string>>(new Set());
 
   const isFarmer = user?.userType === 'farmer';
 
@@ -274,6 +288,21 @@ export default function OrdersScreen() {
     );
   };
 
+  const handleSubmitRating = async (order: Order, rating: number) => {
+    setActionLoading(true);
+    try {
+      await completeTransaction(order.id, rating);
+      setRatedOrders((prev) => new Set(prev).add(order.id));
+      setRatingOrderId(null);
+      setSelectedRating(0);
+      Alert.alert(t('thanks_for_rating'), '');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to submit rating');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Tabs */}
@@ -281,17 +310,27 @@ export default function OrdersScreen() {
         <TouchableOpacity
           style={[styles.tab, selectedTab === 'active' && styles.tabActive]}
           onPress={() => setSelectedTab('active')}
+          accessibilityLabel={`${t('active')} (${activeOrders.length})`}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: selectedTab === 'active' }}
         >
-          <Text style={[styles.tabText, selectedTab === 'active' && styles.tabTextActive]}>
-            Active ({activeOrders.length})
+          <Text
+            style={[styles.tabText, selectedTab === 'active' && styles.tabTextActive]}
+          >
+            {t('active')} ({activeOrders.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, selectedTab === 'completed' && styles.tabActive]}
           onPress={() => setSelectedTab('completed')}
+          accessibilityLabel={`${t('history')} (${completedOrders.length})`}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: selectedTab === 'completed' }}
         >
-          <Text style={[styles.tabText, selectedTab === 'completed' && styles.tabTextActive]}>
-            History ({completedOrders.length})
+          <Text
+            style={[styles.tabText, selectedTab === 'completed' && styles.tabTextActive]}
+          >
+            {t('history')} ({completedOrders.length})
           </Text>
         </TouchableOpacity>
       </View>
@@ -300,18 +339,18 @@ export default function OrdersScreen() {
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2E7D32']} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary[800]]} />
         }
       >
         {loading ? (
           <View style={styles.emptyState}>
-            <ActivityIndicator size="large" color="#2E7D32" />
-            <Text style={styles.emptyText}>Loading orders...</Text>
+            <ActivityIndicator size="large" color={colors.primary[800]} />
+            <Text style={styles.emptyText}>{t('loading_orders')}</Text>
           </View>
         ) : displayOrders.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons name="receipt-outline" size={64} color="#E0E0E0" />
-            <Text style={styles.emptyText}>No {selectedTab} orders</Text>
+            <Ionicons name="receipt-outline" size={64} color={colors.border.light} />
+            <Text style={styles.emptyText}>{t('no_orders')}</Text>
             <Text style={styles.emptySubtext}>
               {isFarmer
                 ? 'Orders will appear when buyers make offers on your listings'
@@ -325,6 +364,9 @@ export default function OrdersScreen() {
               style={styles.orderCard}
               onPress={() => setSelectedOrder(order)}
               activeOpacity={0.7}
+              accessibilityLabel={`${order.crop} - ${t(STATUS_CONFIG[order.status].labelKey as any)} - KSh ${order.totalAmount.toLocaleString()}`}
+              accessibilityRole="button"
+              accessibilityHint={t('order_details')}
             >
               <View style={styles.orderHeader}>
                 <View>
@@ -338,37 +380,37 @@ export default function OrdersScreen() {
                     color={STATUS_CONFIG[order.status].color}
                   />
                   <Text style={[styles.statusText, { color: STATUS_CONFIG[order.status].color }]}>
-                    {STATUS_CONFIG[order.status].label}
+                    {t(STATUS_CONFIG[order.status].labelKey as any)}
                   </Text>
                 </View>
               </View>
 
               <View style={styles.orderBody}>
                 <View style={styles.orderDetail}>
-                  <Ionicons name="person" size={14} color="#666" />
+                  <Ionicons name="person" size={14} color={colors.neutral[600]} />
                   <Text style={styles.orderDetailText}>
                     {isFarmer ? order.buyerName : order.farmerName}
                   </Text>
                 </View>
                 <View style={styles.orderDetail}>
-                  <Ionicons name="location" size={14} color="#666" />
+                  <Ionicons name="location" size={14} color={colors.neutral[600]} />
                   <Text style={styles.orderDetailText}>{order.location}</Text>
                 </View>
                 <View style={styles.orderDetail}>
-                  <Ionicons name="time" size={14} color="#666" />
+                  <Ionicons name="time" size={14} color={colors.neutral[600]} />
                   <Text style={styles.orderDetailText}>{order.createdAt}</Text>
                 </View>
               </View>
 
               <View style={styles.orderFooter}>
                 <View>
-                  <Text style={styles.orderAmountLabel}>Total Amount</Text>
+                  <Text style={styles.orderAmountLabel}>{t('total_amount')}</Text>
                   <Text style={styles.orderAmount}>KSh {order.totalAmount.toLocaleString()}</Text>
                 </View>
                 {order.escrowStatus === 'held' && (
                   <View style={styles.escrowBadge}>
-                    <Ionicons name="shield-checkmark" size={14} color="#1976D2" />
-                    <Text style={styles.escrowText}>Escrow Protected</Text>
+                    <Ionicons name="shield-checkmark" size={14} color={colors.semantic.info} />
+                    <Text style={styles.escrowText}>{t('escrow_protected')}</Text>
                   </View>
                 )}
               </View>
@@ -389,9 +431,13 @@ export default function OrdersScreen() {
             {selectedOrder && (
               <ScrollView showsVerticalScrollIndicator={false}>
                 <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Order Details</Text>
-                  <TouchableOpacity onPress={() => setSelectedOrder(null)}>
-                    <Ionicons name="close" size={24} color="#666" />
+                  <Text style={styles.modalTitle}>{t('order_details')}</Text>
+                  <TouchableOpacity
+                    onPress={() => setSelectedOrder(null)}
+                    accessibilityLabel={t('close')}
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="close" size={24} color={colors.neutral[600]} />
                   </TouchableOpacity>
                 </View>
 
@@ -402,7 +448,7 @@ export default function OrdersScreen() {
                     color={STATUS_CONFIG[selectedOrder.status].color}
                   />
                   <Text style={[styles.statusTextLarge, { color: STATUS_CONFIG[selectedOrder.status].color }]}>
-                    {STATUS_CONFIG[selectedOrder.status].label}
+                    {t(STATUS_CONFIG[selectedOrder.status].labelKey as any)}
                   </Text>
                 </View>
 
@@ -411,43 +457,103 @@ export default function OrdersScreen() {
                   <Text style={styles.detailValue}>{selectedOrder.crop} - {selectedOrder.grade}</Text>
                 </View>
 
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>{isFarmer ? 'Buyer' : 'Farmer'}</Text>
-                  <Text style={styles.detailValue}>
+                <TouchableOpacity
+                  style={styles.detailSection}
+                  onPress={() => {
+                    const profileId = isFarmer ? selectedOrder.buyerId : selectedOrder.farmerId;
+                    if (profileId) {
+                      setSelectedOrder(null);
+                      router.push({ pathname: '/user-profile', params: { userId: profileId } });
+                    }
+                  }}
+                  disabled={!(isFarmer ? selectedOrder.buyerId : selectedOrder.farmerId)}
+                >
+                  <Text style={styles.detailLabel}>{isFarmer ? t('buyer') : t('farmer')}</Text>
+                  <Text style={[styles.detailValue, (isFarmer ? selectedOrder.buyerId : selectedOrder.farmerId) && { color: colors.text.link }]}>
                     {isFarmer ? selectedOrder.buyerName : selectedOrder.farmerName}
+                    {(isFarmer ? selectedOrder.buyerId : selectedOrder.farmerId) ? ' >' : ''}
                   </Text>
-                </View>
+                </TouchableOpacity>
 
                 <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Location</Text>
+                  <Text style={styles.detailLabel}>{t('location')}</Text>
                   <Text style={styles.detailValue}>{selectedOrder.location}</Text>
                 </View>
 
                 <View style={styles.detailRow}>
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Quantity</Text>
+                    <Text style={styles.detailLabel}>{t('quantity')}</Text>
                     <Text style={styles.detailValue}>{selectedOrder.quantity} kg</Text>
                   </View>
                   <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Price/kg</Text>
+                    <Text style={styles.detailLabel}>{t('price_per_kg')}</Text>
                     <Text style={styles.detailValue}>KSh {selectedOrder.pricePerKg}</Text>
                   </View>
                 </View>
 
                 <View style={styles.totalSection}>
-                  <Text style={styles.totalLabel}>Total Amount</Text>
+                  <Text style={styles.totalLabel}>{t('total_amount')}</Text>
                   <Text style={styles.totalValue}>KSh {selectedOrder.totalAmount.toLocaleString()}</Text>
                 </View>
 
                 {selectedOrder.escrowStatus === 'held' && (
                   <View style={styles.escrowInfo}>
-                    <Ionicons name="shield-checkmark" size={20} color="#1976D2" />
+                    <Ionicons name="shield-checkmark" size={20} color={colors.semantic.info} />
                     <View style={styles.escrowInfoText}>
-                      <Text style={styles.escrowTitle}>Escrow Protected</Text>
+                      <Text style={styles.escrowTitle}>{t('escrow_protected')}</Text>
                       <Text style={styles.escrowDesc}>
-                        Funds are held securely until delivery is confirmed
+                        {t('escrow_held')}
                       </Text>
                     </View>
+                  </View>
+                )}
+
+                {/* Rating Prompt for completed/delivered orders */}
+                {(selectedOrder.status === 'completed' || selectedOrder.status === 'delivered') &&
+                  !ratedOrders.has(selectedOrder.id) && (
+                  <View style={styles.ratingCard}>
+                    {ratingOrderId === selectedOrder.id ? (
+                      <>
+                        <Text style={styles.ratingTitle}>{t('tap_to_rate')}</Text>
+                        <View style={styles.starsRow}>
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <TouchableOpacity
+                              key={star}
+                              onPress={() => setSelectedRating(star)}
+                              accessibilityLabel={`${star} stars`}
+                            >
+                              <Ionicons
+                                name={star <= selectedRating ? 'star' : 'star-outline'}
+                                size={32}
+                                color={star <= selectedRating ? colors.accent[500] : colors.neutral[400]}
+                              />
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                        {selectedRating > 0 && (
+                          <Button
+                            variant="primary"
+                            size="medium"
+                            onPress={() => handleSubmitRating(selectedOrder, selectedRating)}
+                            loading={actionLoading}
+                            disabled={actionLoading}
+                            fullWidth
+                            style={{ marginTop: spacing[3] }}
+                          >
+                            {t('submit')} ({selectedRating}/5)
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <TouchableOpacity
+                        style={styles.ratingPrompt}
+                        onPress={() => { setRatingOrderId(selectedOrder.id); setSelectedRating(0); }}
+                      >
+                        <Ionicons name="star-outline" size={20} color={colors.accent[500]} />
+                        <Text style={styles.ratingPromptText}>{t('rate_transaction')}</Text>
+                        <Ionicons name="chevron-forward" size={16} color={colors.neutral[500]} />
+                      </TouchableOpacity>
+                    )}
                   </View>
                 )}
 
@@ -455,83 +561,84 @@ export default function OrdersScreen() {
                 <View style={styles.actions}>
                   {isFarmer && selectedOrder.status === 'pending' && (
                     <>
-                      <TouchableOpacity
-                        style={[styles.declineBtn, actionLoading && styles.btnDisabled]}
+                      <Button
+                        variant="outline"
                         onPress={() => handleDeclineOffer(selectedOrder)}
                         disabled={actionLoading}
+                        accessibilityLabel={t('decline_offer')}
+                        style={styles.declineBtn}
                       >
-                        <Text style={styles.declineBtnText}>Decline</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.acceptBtn, actionLoading && styles.btnDisabled]}
+                        {t('decline_offer')}
+                      </Button>
+                      <Button
+                        variant="primary"
                         onPress={() => handleAcceptOffer(selectedOrder)}
                         disabled={actionLoading}
+                        loading={actionLoading}
+                        accessibilityLabel={t('accept_offer')}
+                        style={styles.acceptBtn}
                       >
-                        {actionLoading ? (
-                          <ActivityIndicator color="#fff" size="small" />
-                        ) : (
-                          <Text style={styles.acceptBtnText}>Accept Offer</Text>
-                        )}
-                      </TouchableOpacity>
+                        {t('accept_offer')}
+                      </Button>
                     </>
                   )}
 
                   {!isFarmer && selectedOrder.status === 'accepted' && (
-                    <TouchableOpacity
-                      style={[styles.payBtn, actionLoading && styles.btnDisabled]}
+                    <Button
+                      variant="primary"
                       onPress={() => handleMakePayment(selectedOrder)}
                       disabled={actionLoading}
+                      loading={actionLoading}
+                      leftIcon={!actionLoading ? <Ionicons name="card" size={20} color={colors.neutral[0]} /> : undefined}
+                      accessibilityLabel={t('pay_mpesa')}
+                      fullWidth
+                      style={styles.payBtn}
                     >
-                      {actionLoading ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <>
-                          <Ionicons name="card" size={20} color="#fff" />
-                          <Text style={styles.payBtnText}>Pay with M-Pesa</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                      {t('pay_mpesa')}
+                    </Button>
                   )}
 
                   {isFarmer && selectedOrder.status === 'paid' && (
-                    <TouchableOpacity
-                      style={[styles.confirmBtn, actionLoading && styles.btnDisabled]}
+                    <Button
+                      variant="primary"
                       onPress={() => handleMarkDelivered(selectedOrder)}
                       disabled={actionLoading}
+                      loading={actionLoading}
+                      leftIcon={!actionLoading ? <Ionicons name="car" size={20} color={colors.neutral[0]} /> : undefined}
+                      accessibilityLabel={t('mark_delivered')}
+                      fullWidth
+                      style={styles.confirmBtn}
                     >
-                      {actionLoading ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <>
-                          <Ionicons name="car" size={20} color="#fff" />
-                          <Text style={styles.confirmBtnText}>Mark as Delivered</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                      {t('mark_delivered')}
+                    </Button>
                   )}
 
                   {!isFarmer && selectedOrder.status === 'delivered' && (
-                    <TouchableOpacity
-                      style={[styles.confirmBtn, actionLoading && styles.btnDisabled]}
+                    <Button
+                      variant="primary"
                       onPress={() => handleConfirmDelivery(selectedOrder)}
                       disabled={actionLoading}
+                      loading={actionLoading}
+                      leftIcon={!actionLoading ? <Ionicons name="checkmark-circle" size={20} color={colors.neutral[0]} /> : undefined}
+                      accessibilityLabel={t('confirm_receipt')}
+                      fullWidth
+                      style={styles.confirmBtn}
                     >
-                      {actionLoading ? (
-                        <ActivityIndicator color="#fff" size="small" />
-                      ) : (
-                        <>
-                          <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                          <Text style={styles.confirmBtnText}>Confirm Receipt</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
+                      {t('confirm_receipt')}
+                    </Button>
                   )}
 
                   {selectedOrder.status === 'in_transit' && (
-                    <TouchableOpacity style={styles.trackBtn}>
-                      <Ionicons name="location" size={20} color="#fff" />
-                      <Text style={styles.trackBtnText}>Track Delivery</Text>
-                    </TouchableOpacity>
+                    <Button
+                      variant="primary"
+                      onPress={() => {}}
+                      leftIcon={<Ionicons name="location" size={20} color={colors.neutral[0]} />}
+                      accessibilityLabel={t('in_transit')}
+                      fullWidth
+                      style={styles.trackBtn}
+                    >
+                      Track Delivery
+                    </Button>
                   )}
                 </View>
 
@@ -545,10 +652,12 @@ export default function OrdersScreen() {
                       Alert.alert('Contact', 'Phone number not available');
                     }
                   }}
+                  accessibilityLabel={`${t('call')} ${isFarmer ? t('buyer') : t('farmer')}`}
+                  accessibilityRole="button"
                 >
-                  <Ionicons name="call" size={18} color="#2E7D32" />
+                  <Ionicons name="call" size={18} color={colors.primary[800]} />
                   <Text style={styles.contactBtnText}>
-                    Call {isFarmer ? 'Buyer' : 'Farmer'}
+                    {t('call')} {isFarmer ? t('buyer') : t('farmer')}
                   </Text>
                 </TouchableOpacity>
               </ScrollView>
@@ -563,85 +672,85 @@ export default function OrdersScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background.secondary,
   },
   tabs: {
     flexDirection: 'row',
-    padding: 16,
-    gap: 12,
+    padding: spacing[4],
+    gap: spacing[3],
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#fff',
+    paddingVertical: spacing[3],
+    borderRadius: radius.lg,
+    backgroundColor: colors.neutral[0],
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: colors.border.light,
   },
   tabActive: {
-    backgroundColor: '#E8F5E9',
-    borderColor: '#2E7D32',
+    backgroundColor: colors.primary[50],
+    borderColor: colors.primary[800],
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: colors.neutral[600],
   },
   tabTextActive: {
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   content: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing[4],
   },
   emptyState: {
     alignItems: 'center',
-    paddingTop: 80,
+    paddingTop: spacing[20],
   },
   emptyText: {
     fontSize: 16,
-    color: '#9E9E9E',
-    marginTop: 16,
+    color: colors.neutral[500],
+    marginTop: spacing[4],
   },
   emptySubtext: {
     fontSize: 13,
-    color: '#BDBDBD',
-    marginTop: 8,
+    color: colors.neutral[400],
+    marginTop: spacing[2],
     textAlign: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: spacing[8],
   },
   orderCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    marginBottom: spacing[3],
     borderWidth: 1,
-    borderColor: '#E8F5E9',
+    borderColor: colors.primary[50],
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   orderCrop: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   orderQuantity: {
     fontSize: 13,
-    color: '#666',
-    marginTop: 2,
+    color: colors.neutral[600],
+    marginTop: spacing[0.5],
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.lg,
+    gap: spacing[1],
   },
   statusText: {
     fontSize: 12,
@@ -650,125 +759,125 @@ const styles = StyleSheet.create({
   orderBody: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 12,
+    gap: spacing[3],
+    marginBottom: spacing[3],
   },
   orderDetail: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: spacing[1],
   },
   orderDetailText: {
     fontSize: 13,
-    color: '#666',
+    color: colors.neutral[600],
   },
   orderFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: '#F5F5F5',
-    paddingTop: 12,
+    borderTopColor: colors.neutral[100],
+    paddingTop: spacing[3],
   },
   orderAmountLabel: {
     fontSize: 11,
-    color: '#666',
+    color: colors.neutral[600],
   },
   orderAmount: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   escrowBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E3F2FD',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    backgroundColor: colors.semantic.infoLight,
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.lg,
+    gap: spacing[1],
   },
   escrowText: {
     fontSize: 11,
-    color: '#1976D2',
+    color: colors.semantic.info,
     fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.overlay.dark,
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing[6],
     maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: spacing[5],
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   statusBadgeLarge: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-    gap: 6,
-    marginBottom: 20,
+    paddingHorizontal: spacing[3.5],
+    paddingVertical: spacing[2],
+    borderRadius: radius.lg,
+    gap: spacing[1.5],
+    marginBottom: spacing[5],
   },
   statusTextLarge: {
     fontSize: 14,
     fontWeight: '600',
   },
   detailSection: {
-    marginBottom: 16,
+    marginBottom: spacing[4],
   },
   detailLabel: {
     fontSize: 12,
-    color: '#666',
-    marginBottom: 4,
+    color: colors.neutral[600],
+    marginBottom: spacing[1],
   },
   detailValue: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: colors.neutral[900],
   },
   detailRow: {
     flexDirection: 'row',
-    gap: 24,
+    gap: spacing[6],
   },
   totalSection: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: colors.neutral[100],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginBottom: spacing[4],
   },
   totalLabel: {
     fontSize: 12,
-    color: '#666',
+    color: colors.neutral[600],
   },
   totalValue: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   escrowInfo: {
     flexDirection: 'row',
-    backgroundColor: '#E3F2FD',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 20,
-    gap: 12,
+    backgroundColor: colors.semantic.infoLight,
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
+    marginBottom: spacing[5],
+    gap: spacing[3],
   },
   escrowInfoText: {
     flex: 1,
@@ -776,104 +885,82 @@ const styles = StyleSheet.create({
   escrowTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1976D2',
+    color: colors.semantic.info,
   },
   escrowDesc: {
     fontSize: 12,
-    color: '#666',
-    marginTop: 2,
+    color: colors.neutral[600],
+    marginTop: spacing[0.5],
   },
   actions: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
+    gap: spacing[3],
+    marginBottom: spacing[4],
   },
   declineBtn: {
     flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.neutral[0],
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    alignItems: 'center',
-  },
-  declineBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#666',
+    borderColor: colors.border.light,
   },
   acceptBtn: {
     flex: 2,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-  },
-  acceptBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
+    backgroundColor: colors.primary[800],
   },
   payBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#2E7D32',
-    gap: 8,
-  },
-  payBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
+    backgroundColor: colors.primary[800],
   },
   confirmBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#2E7D32',
-    gap: 8,
-  },
-  confirmBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
+    backgroundColor: colors.primary[800],
   },
   trackBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
     backgroundColor: '#0097A7',
-    gap: 8,
-  },
-  trackBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
   },
   contactBtn: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#E8F5E9',
-    gap: 8,
+    paddingVertical: spacing[3.5],
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary[50],
+    gap: spacing[2],
   },
   contactBtnText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   btnDisabled: {
     opacity: 0.6,
+  },
+  ratingCard: {
+    backgroundColor: colors.accent[50],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginBottom: spacing[4],
+  },
+  ratingTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text.primary,
+    textAlign: 'center',
+    marginBottom: spacing[3],
+  },
+  starsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing[2],
+  },
+  ratingPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+  },
+  ratingPromptText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.accent[700],
+    flex: 1,
   },
 });

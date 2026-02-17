@@ -1,16 +1,37 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
   Modal,
-  TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { useToast } from '../context/ToastContext';
+import { Text } from '../components/primitives/Text';
+import { Input } from '../components/primitives/Input';
+import { Button } from '../components/primitives/Button';
+import { colors, spacing, radius, shadows } from '@/theme';
+import {
+  getSaccoBalance,
+  getSaccoTransactions,
+  getSaccoGroups,
+  getSaccoLoans,
+  joinSaccoGroup,
+  makeSaccoContribution,
+  applySaccoLoan,
+  repaySaccoLoan,
+  type SaccoBalance,
+  type SaccoTransaction,
+  type SaccoGroupInfo,
+  type SaccoLoanInfo,
+} from '../services/api';
 
 type Transaction = {
   id: string;
@@ -20,29 +41,10 @@ type Transaction = {
   description: string;
 };
 
-const MOCK_BALANCE = {
-  savings: 45000,
-  loanBalance: 15000,
-  availableLoan: 120000,
-  interestEarned: 2250,
-  creditScore: 720,
-};
-
-const MOCK_TRANSACTIONS: Transaction[] = [
-  { id: '1', type: 'contribution', amount: 5000, date: 'Jan 20, 2024', description: 'Monthly contribution' },
-  { id: '2', type: 'interest', amount: 450, date: 'Jan 15, 2024', description: 'Monthly interest (1.5%)' },
-  { id: '3', type: 'repayment', amount: -2500, date: 'Jan 10, 2024', description: 'Loan repayment' },
-  { id: '4', type: 'contribution', amount: 5000, date: 'Dec 20, 2023', description: 'Monthly contribution' },
-  { id: '5', type: 'loan', amount: -20000, date: 'Dec 1, 2023', description: 'Loan disbursement' },
-];
-
-const MOCK_GROUPS = [
-  { id: '1', name: 'Kiambu Farmers Group', members: 24, contribution: 2000, frequency: 'Monthly', balance: 450000 },
-  { id: '2', name: 'Limuru Agri-Coop', members: 18, contribution: 5000, frequency: 'Monthly', balance: 820000 },
-];
-
 export default function SaccoScreen() {
   const { user } = useAuth();
+  const { t } = useLanguage();
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<'overview' | 'groups' | 'loans'>('overview');
   const [showContributeModal, setShowContributeModal] = useState(false);
   const [showLoanModal, setShowLoanModal] = useState(false);
@@ -50,20 +52,74 @@ export default function SaccoScreen() {
   const [loanAmount, setLoanAmount] = useState('');
   const [loanPurpose, setLoanPurpose] = useState('');
 
+  // Real data state
+  const [balance, setBalance] = useState<SaccoBalance>({
+    savings: 0, loanBalance: 0, availableLoan: 0, interestEarned: 0, creditScore: 600,
+  });
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [groups, setGroups] = useState<SaccoGroupInfo[]>([]);
+  const [loans, setLoans] = useState<SaccoLoanInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('');
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [balanceData, txData, groupsData, loansData] = await Promise.all([
+        getSaccoBalance().catch(() => balance),
+        getSaccoTransactions().catch(() => []),
+        getSaccoGroups().catch(() => []),
+        getSaccoLoans().catch(() => []),
+      ]);
+      setBalance(balanceData);
+      setTransactions(txData.map((tx: SaccoTransaction) => ({
+        id: tx.id,
+        type: tx.type,
+        amount: tx.amount,
+        date: new Date(tx.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        description: tx.description,
+      })));
+      setGroups(groupsData);
+      setLoans(loansData);
+      // Set default selected group for contribution
+      const memberGroup = groupsData.find((g: SaccoGroupInfo) => g.isMember);
+      if (memberGroup) setSelectedGroupId(memberGroup.id);
+      else if (groupsData.length > 0) setSelectedGroupId(groupsData[0].id);
+    } catch (error) {
+      console.error('Error loading SACCO data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
   const handleContribute = () => {
     if (!contributeAmount) {
-      Alert.alert('Enter Amount', 'Please enter contribution amount');
+      showToast(t('enter_amount'), 'warning');
+      return;
+    }
+    if (!selectedGroupId) {
+      showToast('Please join a SACCO group first', 'warning');
       return;
     }
     Alert.alert(
-      'M-Pesa Payment',
-      `Contribute KSh ${parseInt(contributeAmount).toLocaleString()} to your SACCO savings?`,
+      t('pay_mpesa'),
+      `${t('contribute')} KSh ${parseInt(contributeAmount).toLocaleString()} ${t('sacco_savings')}?`,
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Pay', onPress: () => {
-          Alert.alert('Payment Initiated', 'Check your phone for M-Pesa prompt.');
-          setShowContributeModal(false);
-          setContributeAmount('');
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('confirm'), onPress: async () => {
+          try {
+            await makeSaccoContribution(selectedGroupId, parseInt(contributeAmount));
+            showToast(t('payment_initiated_check_phone'), 'success');
+            setShowContributeModal(false);
+            setContributeAmount('');
+            loadData();
+          } catch (error) {
+            showToast(t('network_error'), 'error');
+          }
         }},
       ]
     );
@@ -71,33 +127,86 @@ export default function SaccoScreen() {
 
   const handleLoanApplication = () => {
     if (!loanAmount || !loanPurpose) {
-      Alert.alert('Missing Info', 'Please fill in all fields');
+      showToast(t('enter_amount'), 'warning');
       return;
     }
     const amount = parseInt(loanAmount);
-    if (amount > MOCK_BALANCE.availableLoan) {
-      Alert.alert('Exceeds Limit', `Maximum loan amount is KSh ${MOCK_BALANCE.availableLoan.toLocaleString()}`);
+    if (amount > balance.availableLoan) {
+      showToast(`${t('exceeds_limit')}: KSh ${balance.availableLoan.toLocaleString()}`, 'error');
+      return;
+    }
+    if (!selectedGroupId) {
+      showToast('Please join a SACCO group first', 'warning');
       return;
     }
     Alert.alert(
-      'Loan Application',
-      `Apply for KSh ${amount.toLocaleString()} loan?\n\nInterest: 2% monthly\nRepayment: 12 months\nMonthly: KSh ${Math.round(amount * 1.02 / 12).toLocaleString()}`,
+      t('apply_loan'),
+      `KSh ${amount.toLocaleString()}\n\n${t('monthly_interest')}: 2%\n${t('repayment_period')}: 12 ${t('months')}\nKSh ${Math.round(amount * 1.02 / 12).toLocaleString()}`,
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Apply', onPress: () => {
-          Alert.alert('Application Submitted', 'Your loan application is being reviewed. You will be notified within 24 hours.');
-          setShowLoanModal(false);
-          setLoanAmount('');
-          setLoanPurpose('');
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('submit_application'), onPress: async () => {
+          try {
+            await applySaccoLoan({
+              groupId: selectedGroupId,
+              amount,
+              purpose: loanPurpose,
+              termMonths: 12,
+            });
+            showToast(t('payment_initiated_check_phone'), 'success');
+            setShowLoanModal(false);
+            setLoanAmount('');
+            setLoanPurpose('');
+            loadData();
+          } catch (error) {
+            showToast(t('network_error'), 'error');
+          }
         }},
       ]
     );
   };
 
+  const handleRepay = (loan: SaccoLoanInfo) => {
+    const monthlyPayment = Math.round(loan.balance / Math.max(1, loan.termMonths));
+    Alert.alert(
+      t('make_repayment'),
+      `Repay KSh ${monthlyPayment.toLocaleString()} for ${loan.group}?`,
+      [
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('confirm'), onPress: async () => {
+          try {
+            await repaySaccoLoan(loan.id, monthlyPayment);
+            showToast(t('payment_initiated_check_phone'), 'success');
+            loadData();
+          } catch (error) {
+            showToast(t('network_error'), 'error');
+          }
+        }},
+      ]
+    );
+  };
+
+  const handleJoinGroup = async (groupId: string) => {
+    try {
+      await joinSaccoGroup(groupId);
+      showToast('Joined group successfully!', 'success');
+      loadData();
+    } catch (error) {
+      showToast(t('network_error'), 'error');
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={colors.primary[800]} />
+      </View>
+    );
+  }
+
   const getCreditScoreColor = (score: number) => {
-    if (score >= 700) return '#2E7D32';
-    if (score >= 600) return '#F57C00';
-    return '#D32F2F';
+    if (score >= 700) return colors.primary[800];
+    if (score >= 600) return colors.semantic.warning;
+    return colors.semantic.error;
   };
 
   const getCreditScoreLabel = (score: number) => {
@@ -106,30 +215,51 @@ export default function SaccoScreen() {
     return 'Fair';
   };
 
+  const tabLabelMap: Record<string, string> = {
+    overview: t('sacco_savings'),
+    groups: t('sacco_groups'),
+    loans: t('sacco_loans'),
+  };
+
   return (
     <View style={styles.container}>
       {/* Header Card */}
       <View style={styles.headerCard}>
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.headerLabel}>Total Savings</Text>
-            <Text style={styles.headerValue}>KSh {MOCK_BALANCE.savings.toLocaleString()}</Text>
+            <Text
+              variant="caption"
+              style={styles.headerLabel}
+              accessibilityLabel={t('total_savings')}
+            >
+              {t('total_savings')}
+            </Text>
+            <Text variant="heading1" style={styles.headerValue}>
+              KSh {balance.savings.toLocaleString()}
+            </Text>
           </View>
-          <TouchableOpacity style={styles.contributeBtn} onPress={() => setShowContributeModal(true)}>
-            <Ionicons name="add" size={20} color="#fff" />
-            <Text style={styles.contributeBtnText}>Contribute</Text>
-          </TouchableOpacity>
+          <Button
+            variant="ghost"
+            size="small"
+            onPress={() => setShowContributeModal(true)}
+            style={styles.contributeBtn}
+            accessibilityLabel={t('contribute')}
+            accessibilityHint={t('make_contribution')}
+            leftIcon={<Ionicons name="add" size={20} color={colors.neutral[0]} />}
+          >
+            <Text variant="buttonSmall" style={styles.contributeBtnText}>{t('contribute')}</Text>
+          </Button>
         </View>
         <View style={styles.headerStats}>
           <View style={styles.headerStat}>
-            <Text style={styles.statLabel}>Interest Earned</Text>
-            <Text style={styles.statValue}>+KSh {MOCK_BALANCE.interestEarned.toLocaleString()}</Text>
+            <Text variant="caption" style={styles.statLabel}>{t('interest_earned')}</Text>
+            <Text variant="body" style={styles.statValue}>+KSh {balance.interestEarned.toLocaleString()}</Text>
           </View>
           <View style={styles.headerStatDivider} />
           <View style={styles.headerStat}>
-            <Text style={styles.statLabel}>Loan Balance</Text>
-            <Text style={[styles.statValue, { color: '#F57C00' }]}>
-              KSh {MOCK_BALANCE.loanBalance.toLocaleString()}
+            <Text variant="caption" style={styles.statLabel}>{t('loan_balance')}</Text>
+            <Text variant="body" style={[styles.statValue, { color: colors.semantic.warning }]}>
+              KSh {balance.loanBalance.toLocaleString()}
             </Text>
           </View>
         </View>
@@ -139,42 +269,61 @@ export default function SaccoScreen() {
       <View style={styles.creditCard}>
         <View style={styles.creditHeader}>
           <View>
-            <Text style={styles.creditLabel}>Credit Score</Text>
+            <Text variant="caption" style={styles.creditLabel}>{t('credit_score')}</Text>
             <View style={styles.creditScoreRow}>
-              <Text style={[styles.creditScore, { color: getCreditScoreColor(MOCK_BALANCE.creditScore) }]}>
-                {MOCK_BALANCE.creditScore}
+              <Text
+                variant="heading2"
+                style={[styles.creditScore, { color: getCreditScoreColor(balance.creditScore) }]}
+                accessibilityLabel={`${t('credit_score')}: ${balance.creditScore}`}
+              >
+                {balance.creditScore}
               </Text>
-              <View style={[styles.creditBadge, { backgroundColor: getCreditScoreColor(MOCK_BALANCE.creditScore) + '20' }]}>
-                <Text style={[styles.creditBadgeText, { color: getCreditScoreColor(MOCK_BALANCE.creditScore) }]}>
-                  {getCreditScoreLabel(MOCK_BALANCE.creditScore)}
+              <View style={[styles.creditBadge, { backgroundColor: getCreditScoreColor(balance.creditScore) + '20' }]}>
+                <Text variant="caption" style={[styles.creditBadgeText, { color: getCreditScoreColor(balance.creditScore) }]}>
+                  {getCreditScoreLabel(balance.creditScore)}
                 </Text>
               </View>
             </View>
           </View>
           <View style={styles.loanEligibility}>
-            <Text style={styles.eligibilityLabel}>Eligible for</Text>
-            <Text style={styles.eligibilityValue}>KSh {MOCK_BALANCE.availableLoan.toLocaleString()}</Text>
-            <TouchableOpacity style={styles.applyLoanBtn} onPress={() => setShowLoanModal(true)}>
-              <Text style={styles.applyLoanText}>Apply for Loan</Text>
+            <Text variant="caption" style={styles.eligibilityLabel}>{t('max_loan')}</Text>
+            <Text variant="body" style={styles.eligibilityValue}>
+              KSh {balance.availableLoan.toLocaleString()}
+            </Text>
+            <TouchableOpacity
+              style={styles.applyLoanBtn}
+              onPress={() => setShowLoanModal(true)}
+              accessibilityLabel={t('apply_loan')}
+              accessibilityRole="button"
+            >
+              <Text variant="caption" style={styles.applyLoanText}>{t('apply_loan')}</Text>
             </TouchableOpacity>
           </View>
         </View>
         <View style={styles.creditBar}>
-          <View style={[styles.creditBarFill, { width: `${(MOCK_BALANCE.creditScore / 850) * 100}%` }]} />
+          <View style={[styles.creditBarFill, { width: `${(balance.creditScore / 850) * 100}%` }]} />
         </View>
-        <Text style={styles.creditNote}>Score based on transaction history and repayment record</Text>
+        <Text variant="caption" style={styles.creditNote}>
+          Score based on transaction history and repayment record
+        </Text>
       </View>
 
       {/* Tabs */}
       <View style={styles.tabs}>
-        {['overview', 'groups', 'loans'].map((tab) => (
+        {(['overview', 'groups', 'loans'] as const).map((tab) => (
           <TouchableOpacity
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
-            onPress={() => setActiveTab(tab as any)}
+            onPress={() => setActiveTab(tab)}
+            accessibilityLabel={tabLabelMap[tab]}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === tab }}
           >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            <Text
+              variant="buttonSmall"
+              style={[styles.tabText, activeTab === tab && styles.tabTextActive]}
+            >
+              {tabLabelMap[tab]}
             </Text>
           </TouchableOpacity>
         ))}
@@ -183,24 +332,24 @@ export default function SaccoScreen() {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {activeTab === 'overview' && (
           <>
-            <Text style={styles.sectionTitle}>Recent Transactions</Text>
-            {MOCK_TRANSACTIONS.map((tx) => (
-              <View key={tx.id} style={styles.transactionCard}>
+            <Text variant="heading4" style={styles.sectionTitle}>{t('recent_transactions')}</Text>
+            {transactions.map((tx) => (
+              <View key={tx.id} style={styles.transactionCard} accessibilityLabel={`${tx.description}, KSh ${Math.abs(tx.amount)}`}>
                 <View style={[
                   styles.txIcon,
-                  { backgroundColor: tx.amount > 0 ? '#E8F5E9' : '#FFF3E0' }
+                  { backgroundColor: tx.amount > 0 ? colors.primary[50] : colors.semantic.warningLight }
                 ]}>
                   <Ionicons
                     name={tx.type === 'contribution' ? 'arrow-up' : tx.type === 'interest' ? 'trending-up' : 'arrow-down'}
                     size={18}
-                    color={tx.amount > 0 ? '#2E7D32' : '#F57C00'}
+                    color={tx.amount > 0 ? colors.primary[800] : colors.semantic.warning}
                   />
                 </View>
                 <View style={styles.txDetails}>
-                  <Text style={styles.txDescription}>{tx.description}</Text>
-                  <Text style={styles.txDate}>{tx.date}</Text>
+                  <Text variant="bodySmall" style={styles.txDescription}>{tx.description}</Text>
+                  <Text variant="caption" style={styles.txDate}>{tx.date}</Text>
                 </View>
-                <Text style={[styles.txAmount, { color: tx.amount > 0 ? '#2E7D32' : '#F57C00' }]}>
+                <Text variant="bodySmall" style={[styles.txAmount, { color: tx.amount > 0 ? colors.primary[800] : colors.semantic.warning }]}>
                   {tx.amount > 0 ? '+' : ''}KSh {Math.abs(tx.amount).toLocaleString()}
                 </Text>
               </View>
@@ -210,84 +359,130 @@ export default function SaccoScreen() {
 
         {activeTab === 'groups' && (
           <>
-            <Text style={styles.sectionTitle}>My SACCO Groups</Text>
-            {MOCK_GROUPS.map((group) => (
-              <TouchableOpacity key={group.id} style={styles.groupCard} activeOpacity={0.7}>
+            <Text variant="heading4" style={styles.sectionTitle}>{t('my_sacco_groups')}</Text>
+            {groups.map((group) => (
+              <TouchableOpacity
+                key={group.id}
+                style={styles.groupCard}
+                activeOpacity={0.7}
+                onPress={() => !group.isMember ? handleJoinGroup(group.id) : undefined}
+                accessibilityLabel={`${group.name}, ${group.members} ${t('members')}`}
+                accessibilityRole="button"
+              >
                 <View style={styles.groupHeader}>
                   <View style={styles.groupIcon}>
-                    <Ionicons name="people" size={24} color="#2E7D32" />
+                    <Ionicons name="people" size={24} color={colors.primary[800]} />
                   </View>
                   <View style={styles.groupInfo}>
-                    <Text style={styles.groupName}>{group.name}</Text>
-                    <Text style={styles.groupMembers}>{group.members} members</Text>
+                    <Text variant="body" style={styles.groupName}>{group.name}</Text>
+                    <Text variant="caption" style={styles.groupMembers}>
+                      {group.members} {t('members')}
+                    </Text>
                   </View>
                 </View>
                 <View style={styles.groupStats}>
                   <View style={styles.groupStat}>
-                    <Text style={styles.groupStatLabel}>Contribution</Text>
-                    <Text style={styles.groupStatValue}>KSh {group.contribution.toLocaleString()}/{group.frequency}</Text>
+                    <Text variant="caption" style={styles.groupStatLabel}>{t('your_contribution')}</Text>
+                    <Text variant="bodySmall" style={styles.groupStatValue}>
+                      KSh {group.contribution.toLocaleString()}/{group.frequency}
+                    </Text>
                   </View>
                   <View style={styles.groupStat}>
-                    <Text style={styles.groupStatLabel}>Group Balance</Text>
-                    <Text style={styles.groupStatValue}>KSh {group.balance.toLocaleString()}</Text>
+                    <Text variant="caption" style={styles.groupStatLabel}>{t('group_savings')}</Text>
+                    <Text variant="bodySmall" style={styles.groupStatValue}>
+                      KSh {group.balance.toLocaleString()}
+                    </Text>
                   </View>
                 </View>
+                {!group.isMember && (
+                  <Button
+                    variant="primary"
+                    size="small"
+                    fullWidth
+                    onPress={() => handleJoinGroup(group.id)}
+                    accessibilityLabel={t('join_sacco')}
+                  >
+                    {t('join_sacco')}
+                  </Button>
+                )}
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={styles.joinGroupBtn}>
-              <Ionicons name="add-circle-outline" size={20} color="#2E7D32" />
-              <Text style={styles.joinGroupText}>Join a SACCO Group</Text>
-            </TouchableOpacity>
           </>
         )}
 
         {activeTab === 'loans' && (
           <>
-            <Text style={styles.sectionTitle}>Active Loans</Text>
-            <View style={styles.loanCard}>
-              <View style={styles.loanHeader}>
-                <Text style={styles.loanTitle}>Working Capital Loan</Text>
-                <View style={styles.loanStatusBadge}>
-                  <Text style={styles.loanStatusText}>Active</Text>
+            <Text variant="heading4" style={styles.sectionTitle}>{t('active_loans')}</Text>
+            {loans.filter((l) => l.status === 'ACTIVE' || l.status === 'APPROVED').map((loan) => {
+              const repaidPercent = loan.amount > 0 ? Math.round((loan.amountRepaid / loan.amount) * 100) : 0;
+              const monthlyPayment = Math.round(loan.balance * loan.interestRate / 100);
+              return (
+                <View key={loan.id} style={styles.loanCard}>
+                  <View style={styles.loanHeader}>
+                    <Text variant="body" style={styles.loanTitle}>{loan.purpose || loan.group}</Text>
+                    <View style={styles.loanStatusBadge}>
+                      <Text variant="caption" style={styles.loanStatusText}>{loan.status}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.loanProgress}>
+                    <View style={styles.loanProgressBar}>
+                      <View style={[styles.loanProgressFill, { width: `${repaidPercent}%` }]} />
+                    </View>
+                    <Text variant="caption" style={styles.loanProgressText}>
+                      KSh {loan.amountRepaid.toLocaleString()} / {loan.amount.toLocaleString()} repaid
+                    </Text>
+                  </View>
+                  <View style={styles.loanDetails}>
+                    <View style={styles.loanDetail}>
+                      <Text variant="caption" style={styles.loanDetailLabel}>{t('loan_balance')}</Text>
+                      <Text variant="bodySmall" style={styles.loanDetailValue}>KSh {loan.balance.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.loanDetail}>
+                      <Text variant="caption" style={styles.loanDetailLabel}>{t('monthly_interest')}</Text>
+                      <Text variant="bodySmall" style={styles.loanDetailValue}>KSh {monthlyPayment.toLocaleString()}</Text>
+                    </View>
+                    <View style={styles.loanDetail}>
+                      <Text variant="caption" style={styles.loanDetailLabel}>{t('due_date')}</Text>
+                      <Text variant="bodySmall" style={styles.loanDetailValue}>
+                        {loan.dueDate ? new Date(loan.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '-'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Button
+                    variant="primary"
+                    size="medium"
+                    fullWidth
+                    onPress={() => handleRepay(loan)}
+                    style={styles.repayBtn}
+                    accessibilityLabel={t('make_repayment')}
+                  >
+                    {t('make_repayment')}
+                  </Button>
                 </View>
-              </View>
-              <View style={styles.loanProgress}>
-                <View style={styles.loanProgressBar}>
-                  <View style={[styles.loanProgressFill, { width: '25%' }]} />
-                </View>
-                <Text style={styles.loanProgressText}>KSh 5,000 / 20,000 repaid</Text>
-              </View>
-              <View style={styles.loanDetails}>
-                <View style={styles.loanDetail}>
-                  <Text style={styles.loanDetailLabel}>Remaining</Text>
-                  <Text style={styles.loanDetailValue}>KSh 15,000</Text>
-                </View>
-                <View style={styles.loanDetail}>
-                  <Text style={styles.loanDetailLabel}>Monthly</Text>
-                  <Text style={styles.loanDetailValue}>KSh 2,500</Text>
-                </View>
-                <View style={styles.loanDetail}>
-                  <Text style={styles.loanDetailLabel}>Due Date</Text>
-                  <Text style={styles.loanDetailValue}>Feb 10</Text>
-                </View>
-              </View>
-              <TouchableOpacity style={styles.repayBtn}>
-                <Text style={styles.repayBtnText}>Make Repayment</Text>
-              </TouchableOpacity>
-            </View>
+              );
+            })}
+            {loans.filter((l) => l.status === 'ACTIVE' || l.status === 'APPROVED').length === 0 && (
+              <Text variant="bodySmall" style={{ color: colors.neutral[600], textAlign: 'center', marginBottom: spacing[4] }}>
+                {t('no_active_loans')}
+              </Text>
+            )}
 
-            <Text style={styles.sectionTitle}>Loan Products</Text>
+            <Text variant="heading4" style={styles.sectionTitle}>{t('loan_products')}</Text>
             {[
-              { name: 'Emergency Loan', rate: '1.5%', max: 'Up to 1x savings', term: '3 months' },
-              { name: 'Working Capital', rate: '2%', max: 'Up to 3x savings', term: '12 months' },
-              { name: 'Asset Finance', rate: '2.5%', max: 'Up to 5x savings', term: '24 months' },
+              { name: 'Emergency Loan', rate: '1.5%', max: 'Up to 1x savings', term: `3 ${t('months')}` },
+              { name: 'Working Capital', rate: '2%', max: 'Up to 3x savings', term: `12 ${t('months')}` },
+              { name: 'Asset Finance', rate: '2.5%', max: 'Up to 5x savings', term: `24 ${t('months')}` },
             ].map((product, index) => (
-              <View key={index} style={styles.productCard}>
-                <Text style={styles.productName}>{product.name}</Text>
+              <View key={index} style={styles.productCard} accessibilityLabel={`${product.name}, ${t('monthly_interest')}: ${product.rate}`}>
+                <Text variant="bodySmall" style={styles.productName}>{product.name}</Text>
                 <View style={styles.productDetails}>
-                  <Text style={styles.productDetail}>Interest: {product.rate}/month</Text>
-                  <Text style={styles.productDetail}>{product.max}</Text>
-                  <Text style={styles.productDetail}>Term: {product.term}</Text>
+                  <Text variant="caption" style={styles.productDetail}>
+                    {t('monthly_interest')}: {product.rate}
+                  </Text>
+                  <Text variant="caption" style={styles.productDetail}>{product.max}</Text>
+                  <Text variant="caption" style={styles.productDetail}>
+                    {t('repayment_period')}: {product.term}
+                  </Text>
                 </View>
               </View>
             ))}
@@ -299,19 +494,21 @@ export default function SaccoScreen() {
 
       {/* Contribute Modal */}
       <Modal visible={showContributeModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Make Contribution</Text>
-            <Text style={styles.modalSubtitle}>Add to your SACCO savings</Text>
+            <Text variant="heading3" style={styles.modalTitle}>{t('make_contribution')}</Text>
+            <Text variant="bodySmall" style={styles.modalSubtitle}>{t('sacco_savings')}</Text>
 
-            <Text style={styles.inputLabel}>Amount (KSh)</Text>
-            <TextInput
-              style={styles.input}
+            <Input
+              label={`${t('contribution_amount')} (KSh)`}
               value={contributeAmount}
               onChangeText={setContributeAmount}
-              placeholder="e.g. 5000"
+              placeholder={t('enter_amount')}
               keyboardType="numeric"
-              placeholderTextColor="#9E9E9E"
+              accessibilityLabel={t('contribution_amount')}
             />
 
             <View style={styles.quickAmounts}>
@@ -320,70 +517,104 @@ export default function SaccoScreen() {
                   key={amount}
                   style={styles.quickAmount}
                   onPress={() => setContributeAmount(amount.toString())}
+                  accessibilityLabel={`KSh ${amount.toLocaleString()}`}
+                  accessibilityRole="button"
                 >
-                  <Text style={styles.quickAmountText}>{amount.toLocaleString()}</Text>
+                  <Text variant="buttonSmall" style={styles.quickAmountText}>{amount.toLocaleString()}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowContributeModal(false)}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.submitBtn} onPress={handleContribute}>
-                <Text style={styles.submitBtnText}>Pay with M-Pesa</Text>
-              </TouchableOpacity>
+              <Button
+                variant="ghost"
+                size="medium"
+                onPress={() => setShowContributeModal(false)}
+                style={styles.cancelBtn}
+                accessibilityLabel={t('cancel')}
+              >
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="primary"
+                size="medium"
+                onPress={handleContribute}
+                style={styles.submitBtn}
+                accessibilityLabel={t('pay_mpesa')}
+              >
+                {t('pay_mpesa')}
+              </Button>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Loan Modal */}
       <Modal visible={showLoanModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Apply for Loan</Text>
-            <Text style={styles.modalSubtitle}>
-              Eligible for up to KSh {MOCK_BALANCE.availableLoan.toLocaleString()}
+            <Text variant="heading3" style={styles.modalTitle}>{t('apply_loan')}</Text>
+            <Text variant="bodySmall" style={styles.modalSubtitle}>
+              {t('max_loan')}: KSh {balance.availableLoan.toLocaleString()}
             </Text>
 
-            <Text style={styles.inputLabel}>Loan Amount (KSh)</Text>
-            <TextInput
-              style={styles.input}
+            <Input
+              label={`${t('loan_amount')} (KSh)`}
               value={loanAmount}
               onChangeText={setLoanAmount}
-              placeholder="e.g. 50000"
+              placeholder={t('enter_amount')}
               keyboardType="numeric"
-              placeholderTextColor="#9E9E9E"
+              accessibilityLabel={t('loan_amount')}
             />
 
-            <Text style={styles.inputLabel}>Purpose</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
+            <Input
+              label={t('loan_purpose')}
               value={loanPurpose}
               onChangeText={setLoanPurpose}
-              placeholder="e.g. Purchase farming inputs"
+              placeholder={t('enter_purpose')}
               multiline
-              placeholderTextColor="#9E9E9E"
+              inputStyle={styles.textArea}
+              accessibilityLabel={t('loan_purpose')}
             />
 
             <View style={styles.loanTerms}>
-              <Text style={styles.termsTitle}>Loan Terms</Text>
-              <Text style={styles.termsText}>• Interest rate: 2% per month</Text>
-              <Text style={styles.termsText}>• Repayment period: Up to 12 months</Text>
-              <Text style={styles.termsText}>• Processing fee: 1% of loan amount</Text>
+              <Text variant="bodySmall" style={styles.termsTitle}>{t('loan_terms')}</Text>
+              <Text variant="caption" style={styles.termsText}>
+                {'\u2022'} {t('monthly_interest')}: 2%
+              </Text>
+              <Text variant="caption" style={styles.termsText}>
+                {'\u2022'} {t('repayment_period')}: 12 {t('months')}
+              </Text>
+              <Text variant="caption" style={styles.termsText}>
+                {'\u2022'} Processing fee: 1%
+              </Text>
             </View>
 
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowLoanModal(false)}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.submitBtn} onPress={handleLoanApplication}>
-                <Text style={styles.submitBtnText}>Submit Application</Text>
-              </TouchableOpacity>
+              <Button
+                variant="ghost"
+                size="medium"
+                onPress={() => setShowLoanModal(false)}
+                style={styles.cancelBtn}
+                accessibilityLabel={t('cancel')}
+              >
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="primary"
+                size="medium"
+                onPress={handleLoanApplication}
+                style={styles.submitBtn}
+                accessibilityLabel={t('submit_application')}
+              >
+                {t('submit_application')}
+              </Button>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -392,48 +623,48 @@ export default function SaccoScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background.secondary,
   },
   headerCard: {
-    backgroundColor: '#2E7D32',
-    margin: 16,
-    borderRadius: 20,
-    padding: 20,
+    backgroundColor: colors.primary[800],
+    margin: spacing[4],
+    borderRadius: radius.xl,
+    padding: spacing[5],
   },
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 20,
+    marginBottom: spacing[5],
   },
   headerLabel: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.8)',
+    color: colors.overlay.light,
   },
   headerValue: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.neutral[0],
   },
   contributeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+    paddingHorizontal: spacing[3.5],
+    paddingVertical: spacing[2],
+    borderRadius: radius.xl,
+    gap: spacing[1.5],
   },
   contributeBtnText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.neutral[0],
   },
   headerStats: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
   },
   headerStat: {
     flex: 1,
@@ -450,40 +681,40 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#A5D6A7',
-    marginTop: 2,
+    color: colors.primary[200],
+    marginTop: spacing[0.5],
   },
   creditCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 16,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: colors.neutral[0],
+    marginHorizontal: spacing[4],
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    marginBottom: spacing[4],
     borderWidth: 1,
-    borderColor: '#E8F5E9',
+    borderColor: colors.primary[50],
   },
   creditHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: spacing[3],
   },
   creditLabel: {
     fontSize: 12,
-    color: '#666',
+    color: colors.neutral[600],
   },
   creditScoreRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: spacing[2],
   },
   creditScore: {
     fontSize: 28,
     fontWeight: '700',
   },
   creditBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 8,
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[0.5],
+    borderRadius: radius.md,
   },
   creditBadgeText: {
     fontSize: 11,
@@ -494,90 +725,90 @@ const styles = StyleSheet.create({
   },
   eligibilityLabel: {
     fontSize: 11,
-    color: '#666',
+    color: colors.neutral[600],
   },
   eligibilityValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   applyLoanBtn: {
-    marginTop: 6,
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    marginTop: spacing[1.5],
+    backgroundColor: colors.primary[50],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1.5],
+    borderRadius: radius.lg,
   },
   applyLoanText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   creditBar: {
     height: 6,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 3,
-    marginBottom: 8,
+    backgroundColor: colors.border.light,
+    borderRadius: radius.xs,
+    marginBottom: spacing[2],
   },
   creditBarFill: {
     height: '100%',
-    backgroundColor: '#2E7D32',
-    borderRadius: 3,
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.xs,
   },
   creditNote: {
     fontSize: 10,
-    color: '#9E9E9E',
+    color: colors.neutral[500],
   },
   tabs: {
     flexDirection: 'row',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 4,
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[4],
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
+    padding: spacing[1],
   },
   tab: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: spacing[2.5],
     alignItems: 'center',
-    borderRadius: 10,
+    borderRadius: radius.lg,
   },
   tabActive: {
-    backgroundColor: '#E8F5E9',
+    backgroundColor: colors.primary[50],
   },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#666',
+    color: colors.neutral[600],
   },
   tabTextActive: {
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   content: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing[4],
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 12,
+    color: colors.neutral[900],
+    marginBottom: spacing[3],
   },
   transactionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
+    marginBottom: spacing[2.5],
   },
   txIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: spacing[10],
+    height: spacing[10],
+    borderRadius: spacing[5],
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: spacing[3],
   },
   txDetails: {
     flex: 1,
@@ -585,36 +816,36 @@ const styles = StyleSheet.create({
   txDescription: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#333',
+    color: colors.neutral[900],
   },
   txDate: {
     fontSize: 12,
-    color: '#9E9E9E',
-    marginTop: 2,
+    color: colors.neutral[500],
+    marginTop: spacing[0.5],
   },
   txAmount: {
     fontSize: 15,
     fontWeight: '700',
   },
   groupCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    marginBottom: spacing[3],
   },
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: spacing[3.5],
   },
   groupIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E8F5E9',
+    width: spacing[12],
+    height: spacing[12],
+    borderRadius: spacing[6],
+    backgroundColor: colors.primary[50],
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: spacing[3],
   },
   groupInfo: {
     flex: 1,
@@ -622,185 +853,163 @@ const styles = StyleSheet.create({
   groupName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1B5E20',
+    color: colors.primary[900],
   },
   groupMembers: {
     fontSize: 13,
-    color: '#666',
+    color: colors.neutral[600],
   },
   groupStats: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderTopColor: '#F5F5F5',
-    paddingTop: 14,
+    borderTopColor: colors.neutral[100],
+    paddingTop: spacing[3.5],
   },
   groupStat: {
     flex: 1,
   },
   groupStatLabel: {
     fontSize: 11,
-    color: '#666',
+    color: colors.neutral[600],
   },
   groupStatValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
-    marginTop: 2,
+    color: colors.neutral[900],
+    marginTop: spacing[0.5],
   },
   joinGroupBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
+    padding: spacing[4],
     borderWidth: 1.5,
-    borderColor: '#2E7D32',
+    borderColor: colors.primary[800],
     borderStyle: 'dashed',
-    gap: 8,
+    gap: spacing[2],
   },
   joinGroupText: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   loanCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    marginBottom: spacing[5],
   },
   loanHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: spacing[3.5],
   },
   loanTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: colors.neutral[900],
   },
   loanStatusBadge: {
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
+    backgroundColor: colors.primary[50],
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.lg,
   },
   loanStatusText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   loanProgress: {
-    marginBottom: 14,
+    marginBottom: spacing[3.5],
   },
   loanProgressBar: {
-    height: 8,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 4,
-    marginBottom: 6,
+    height: spacing[2],
+    backgroundColor: colors.border.light,
+    borderRadius: radius.sm,
+    marginBottom: spacing[1.5],
   },
   loanProgressFill: {
     height: '100%',
-    backgroundColor: '#2E7D32',
-    borderRadius: 4,
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.sm,
   },
   loanProgressText: {
     fontSize: 12,
-    color: '#666',
+    color: colors.neutral[600],
   },
   loanDetails: {
     flexDirection: 'row',
-    marginBottom: 14,
+    marginBottom: spacing[3.5],
   },
   loanDetail: {
     flex: 1,
   },
   loanDetailLabel: {
     fontSize: 11,
-    color: '#666',
+    color: colors.neutral[600],
   },
   loanDetailValue: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: colors.neutral[900],
   },
   repayBtn: {
-    backgroundColor: '#2E7D32',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  repayBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.lg,
   },
   productCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
+    marginBottom: spacing[2.5],
   },
   productName: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
+    color: colors.neutral[900],
+    marginBottom: spacing[2],
   },
   productDetails: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: spacing[2],
   },
   productDetail: {
     fontSize: 12,
-    color: '#666',
-    backgroundColor: '#F5F5F5',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    color: colors.neutral[600],
+    backgroundColor: colors.neutral[100],
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[1],
+    borderRadius: radius.sm,
   },
   bottomPadding: {
-    height: 20,
+    height: spacing[5],
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.overlay.dark,
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 24,
+    backgroundColor: colors.neutral[0],
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing[6],
   },
   modalTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#1B5E20',
-    marginBottom: 4,
+    color: colors.primary[900],
+    marginBottom: spacing[1],
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 20,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 16,
+    color: colors.neutral[600],
+    marginBottom: spacing[5],
   },
   textArea: {
     height: 80,
@@ -808,64 +1017,50 @@ const styles = StyleSheet.create({
   },
   quickAmounts: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 20,
+    gap: spacing[2.5],
+    marginBottom: spacing[5],
   },
   quickAmount: {
     flex: 1,
-    backgroundColor: '#E8F5E9',
-    paddingVertical: 10,
-    borderRadius: 10,
+    backgroundColor: colors.primary[50],
+    paddingVertical: spacing[2.5],
+    borderRadius: radius.lg,
     alignItems: 'center',
   },
   quickAmountText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#2E7D32',
+    color: colors.primary[800],
   },
   loanTerms: {
-    backgroundColor: '#FFF8E1',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 20,
+    backgroundColor: colors.accent[50],
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
+    marginBottom: spacing[5],
   },
   termsTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#F57C00',
-    marginBottom: 8,
+    color: colors.semantic.warning,
+    marginBottom: spacing[2],
   },
   termsText: {
     fontSize: 13,
-    color: '#666',
-    marginBottom: 4,
+    color: colors.neutral[600],
+    marginBottom: spacing[1],
   },
   modalActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: spacing[3],
   },
   cancelBtn: {
     flex: 1,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5F5F5',
-    alignItems: 'center',
-  },
-  cancelBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#666',
+    borderRadius: radius.lg,
+    backgroundColor: colors.neutral[100],
   },
   submitBtn: {
     flex: 2,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#2E7D32',
-    alignItems: 'center',
-  },
-  submitBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary[800],
   },
 });

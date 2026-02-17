@@ -1,22 +1,28 @@
 import { useState, useEffect } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   TouchableOpacity,
   Image,
-  TextInput,
   ScrollView,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { Text } from '../components/primitives/Text';
+import { Button } from '../components/primitives/Button';
+import { Input } from '../components/primitives/Input';
 import AIPriceSuggestion from '../components/AIPriceSuggestion';
 import SuccessEstimate from '../components/SuccessEstimate';
 import { getPricePrediction, createListing } from '../services/api';
+import { colors, spacing, radius, shadows } from '@/theme';
 
 const CROP_TYPES = [
   { id: 'tomato', name: 'Tomatoes', icon: 'nutrition' },
@@ -29,14 +35,13 @@ const CROP_TYPES = [
   { id: 'mango', name: 'Mangoes', icon: 'nutrition' },
 ];
 
-const GRADES = ['Premium', 'Grade A', 'Grade B', 'Grade C'];
-
 type Step = 1 | 2 | 3 | 4;
 
 export default function SellScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ crop?: string; suggestedPrice?: string }>();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [step, setStep] = useState<Step>(1);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -48,12 +53,8 @@ export default function SellScreen() {
 
   // Pre-fill from AI insight action
   useEffect(() => {
-    if (params.crop) {
-      setCropType(params.crop);
-    }
-    if (params.suggestedPrice) {
-      setPricePerKg(params.suggestedPrice);
-    }
+    if (params.crop) setCropType(params.crop);
+    if (params.suggestedPrice) setPricePerKg(params.suggestedPrice);
   }, [params.crop, params.suggestedPrice]);
 
   // Step 2: Photos & AI Grading
@@ -63,19 +64,23 @@ export default function SellScreen() {
   const [suggestedPrice, setSuggestedPrice] = useState<number>(0);
 
   // Step 3: Harvest Details
-  const [harvestDate, setHarvestDate] = useState('');
+  const [harvestDate, setHarvestDate] = useState(() => {
+    const d = new Date();
+    return d.toISOString().split('T')[0];
+  });
   const [availableDays, setAvailableDays] = useState('7');
   const [storageCondition, setStorageCondition] = useState('cool_dry');
 
-  // Step 4: Delivery Options
+  // Step 4: Pickup Location
   const [pickupLocation, setPickupLocation] = useState(user?.location || '');
-  const [deliveryAvailable, setDeliveryAvailable] = useState(true);
-  const [deliveryRadius, setDeliveryRadius] = useState('50');
+  const [pickupLatitude, setPickupLatitude] = useState<number | null>(null);
+  const [pickupLongitude, setPickupLongitude] = useState<number | null>(null);
+  const [gettingLocation, setGettingLocation] = useState(false);
 
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera roll access is required');
+      Alert.alert(t('error'), t('more_photos_needed'));
       return;
     }
 
@@ -94,7 +99,7 @@ export default function SellScreen() {
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera access is required');
+      Alert.alert(t('error'), t('more_photos_needed'));
       return;
     }
 
@@ -110,13 +115,11 @@ export default function SellScreen() {
 
   const runAIGrading = async () => {
     if (photos.length < 2) {
-      Alert.alert('More Photos Needed', 'Please add at least 2 photos for accurate grading');
+      Alert.alert(t('error'), t('more_photos_needed'));
       return;
     }
 
     setIsProcessing(true);
-
-    // Simulate AI image grading (would require computer vision in production)
     await new Promise(resolve => setTimeout(resolve, 1500));
     const grades = ['Premium', 'Grade A', 'Grade B'];
     const randomGrade = grades[Math.floor(Math.random() * grades.length)];
@@ -125,7 +128,6 @@ export default function SellScreen() {
     setAiGrade(randomGrade);
     setAiConfidence(confidence);
 
-    // Get real price prediction from AI backend
     try {
       const gradeMap: Record<string, string> = {
         'Premium': 'PREMIUM',
@@ -142,7 +144,6 @@ export default function SellScreen() {
       setSuggestedPrice(prediction.recommendedPrice);
       if (!pricePerKg) setPricePerKg(prediction.recommendedPrice.toString());
     } catch (err) {
-      // Fallback to local calculation if API fails
       const basePrices: Record<string, number> = {
         tomato: 100, potato: 80, onion: 90, cabbage: 60,
         carrot: 85, kale: 50, spinach: 55, mango: 150,
@@ -157,24 +158,55 @@ export default function SellScreen() {
     setIsProcessing(false);
   };
 
+  const useCurrentLocation = async () => {
+    setGettingLocation(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(t('error'), t('location_permission_needed'));
+        setGettingLocation(false);
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({});
+      setPickupLatitude(position.coords.latitude);
+      setPickupLongitude(position.coords.longitude);
+
+      // Reverse geocode to get address
+      const [address] = await Location.reverseGeocodeAsync({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+
+      if (address) {
+        const parts = [address.subregion, address.region].filter(Boolean);
+        setPickupLocation(parts.join(', ') || address.city || pickupLocation);
+      }
+    } catch (error) {
+      console.error('Location error:', error);
+      Alert.alert(t('error'), 'Could not get your location. Please enter it manually.');
+    }
+    setGettingLocation(false);
+  };
+
   const validateStep = (): boolean => {
     if (step === 1) {
       if (!cropType || !quantity || !pricePerKg) {
-        Alert.alert('Missing Info', 'Please fill in crop type, quantity, and price');
+        Alert.alert(t('error'), t('grading_required'));
         return false;
       }
     } else if (step === 2) {
       if (photos.length < 2) {
-        Alert.alert('Photos Required', 'Please add at least 2 photos');
+        Alert.alert(t('error'), t('more_photos_needed'));
         return false;
       }
       if (!aiGrade) {
-        Alert.alert('Grading Required', 'Please run AI grading before proceeding');
+        Alert.alert(t('error'), t('grading_required'));
         return false;
       }
     } else if (step === 3) {
       if (!harvestDate) {
-        Alert.alert('Missing Info', 'Please enter harvest date');
+        Alert.alert(t('error'), t('harvest_date'));
         return false;
       }
     }
@@ -182,9 +214,7 @@ export default function SellScreen() {
   };
 
   const nextStep = () => {
-    if (validateStep()) {
-      setStep((step + 1) as Step);
-    }
+    if (validateStep()) setStep((step + 1) as Step);
   };
 
   const prevStep = () => {
@@ -195,113 +225,130 @@ export default function SellScreen() {
     setIsProcessing(true);
 
     try {
-      // Map crop id to display name
       const cropName = CROP_TYPES.find(c => c.id === cropType)?.name || cropType;
-
-      // Create listing via API
       await createListing({
         crop: cropName,
         grade: aiGrade || 'Grade A',
         price: parseInt(pricePerKg),
         quantity: parseInt(quantity),
-        location: pickupLocation || user?.location || 'Kenya',
-        imageUri: photos[0], // First photo
+        county: pickupLocation || user?.location || 'Kenya',
+        latitude: pickupLatitude ?? undefined,
+        longitude: pickupLongitude ?? undefined,
       });
-
       setIsProcessing(false);
       Alert.alert(
-        'Listing Published!',
-        `Your ${cropName} listing is now live on the marketplace.`,
-        [{ text: 'View Listings', onPress: () => router.push('/market') }]
+        t('listing_published'),
+        t('listing_live'),
+        [{ text: t('ok'), onPress: () => router.push('/market') }]
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error publishing listing:', error);
       setIsProcessing(false);
-      // Still show success for demo purposes
-      Alert.alert(
-        'Listing Published!',
-        `Your ${CROP_TYPES.find(c => c.id === cropType)?.name} listing is now live.`,
-        [{ text: 'View Listings', onPress: () => router.push('/market') }]
-      );
+      const message = error?.response?.data?.error?.message || t('listing_failed');
+      Alert.alert(t('error'), message);
     }
   };
 
-  const gradeColors: Record<string, string> = {
-    Premium: '#1B5E20',
-    'Grade A': '#388E3C',
-    'Grade B': '#F57C00',
-    'Grade C': '#E65100',
+  const gradeColorMap: Record<string, string> = {
+    Premium: colors.grade.premium.text,
+    'Grade A': colors.grade.gradeA.text,
+    'Grade B': colors.grade.gradeB.text,
+    'Grade C': colors.semantic.error,
+  };
+
+  const gradeBgMap: Record<string, string> = {
+    Premium: colors.grade.premium.light,
+    'Grade A': colors.grade.gradeA.light,
+    'Grade B': colors.grade.gradeB.light,
+    'Grade C': colors.semantic.errorLight,
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
       {/* Progress Bar */}
       <View style={styles.progressContainer}>
         <View style={styles.progressBar}>
           <View style={[styles.progressFill, { width: `${(step / 4) * 100}%` }]} />
         </View>
-        <Text style={styles.progressText}>Step {step} of 4</Text>
+        <Text variant="caption" color="secondary" style={styles.progressText}>
+          {t('step_x_of_y').replace('%1', String(step)).replace('%2', '4')}
+        </Text>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Step 1: Basic Info */}
         {step === 1 && (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>What are you selling?</Text>
-            <Text style={styles.stepSubtitle}>Select crop type and enter details</Text>
+            <Text variant="heading2" style={{ color: colors.primary[900], marginBottom: spacing[2] }}>
+              {t('what_selling')}
+            </Text>
+            <Text variant="bodySmall" color="secondary" style={{ marginBottom: spacing[6] }}>
+              {t('select_crop')}
+            </Text>
 
-            <Text style={styles.label}>Crop Type</Text>
+            <Text variant="label" style={{ marginBottom: spacing[2], marginTop: spacing[4] }}>
+              {t('crop_type')}
+            </Text>
             <View style={styles.cropGrid}>
               {CROP_TYPES.map((crop) => (
                 <TouchableOpacity
                   key={crop.id}
                   style={[styles.cropOption, cropType === crop.id && styles.cropOptionSelected]}
                   onPress={() => setCropType(crop.id)}
+                  accessibilityLabel={`${t('crop_type')}: ${crop.name}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: cropType === crop.id }}
                 >
                   <Ionicons
                     name={crop.icon as any}
                     size={24}
-                    color={cropType === crop.id ? '#2E7D32' : '#666'}
+                    color={cropType === crop.id ? colors.primary[800] : colors.neutral[600]}
                   />
-                  <Text style={[styles.cropOptionText, cropType === crop.id && styles.cropOptionTextSelected]}>
+                  <Text
+                    variant="caption"
+                    style={{
+                      color: cropType === crop.id ? colors.primary[800] : colors.neutral[600],
+                      fontWeight: cropType === crop.id ? '600' : '400',
+                      marginTop: spacing[1],
+                      textAlign: 'center',
+                    }}
+                  >
                     {crop.name}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={styles.label}>Quantity (kg)</Text>
-            <TextInput
-              style={styles.input}
+            <Input
+              label={t('quantity_kg')}
               value={quantity}
               onChangeText={setQuantity}
               placeholder="e.g. 500"
               keyboardType="numeric"
-              placeholderTextColor="#9E9E9E"
+              containerStyle={{ marginTop: spacing[4] }}
             />
 
-            <Text style={styles.label}>Price per kg (KSh)</Text>
-            <TextInput
-              style={styles.input}
+            <Input
+              label={t('price_per_kg')}
               value={pricePerKg}
               onChangeText={setPricePerKg}
               placeholder="e.g. 80"
               keyboardType="numeric"
-              placeholderTextColor="#9E9E9E"
             />
 
-            <Text style={styles.label}>Description (optional)</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
+            <Input
+              label={t('description_optional')}
               value={description}
               onChangeText={setDescription}
-              placeholder="Describe your produce quality, freshness, etc."
+              placeholder={t('description')}
               multiline
               numberOfLines={3}
-              placeholderTextColor="#9E9E9E"
+              inputStyle={{ height: 100, textAlignVertical: 'top' }}
             />
 
-            {/* AI Price Suggestion - shows when crop and quantity are entered */}
             {cropType && quantity && parseInt(quantity) > 0 && (
               <AIPriceSuggestion
                 crop={cropType}
@@ -317,68 +364,107 @@ export default function SellScreen() {
         {/* Step 2: Photos & AI Grading */}
         {step === 2 && (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Add Photos</Text>
-            <Text style={styles.stepSubtitle}>Upload at least 2 photos for AI quality grading</Text>
+            <Text variant="heading2" style={{ color: colors.primary[900], marginBottom: spacing[2] }}>
+              {t('add_photos')}
+            </Text>
+            <Text variant="bodySmall" color="secondary" style={{ marginBottom: spacing[6] }}>
+              {t('upload_photos')}
+            </Text>
 
             <View style={styles.photoGrid}>
               {photos.map((photo, index) => (
                 <View key={index} style={styles.photoContainer}>
                   <Image source={{ uri: photo }} style={styles.photo} />
-                  <TouchableOpacity style={styles.removePhoto} onPress={() => removePhoto(index)}>
-                    <Ionicons name="close-circle" size={24} color="#F44336" />
+                  <TouchableOpacity
+                    style={styles.removePhoto}
+                    onPress={() => removePhoto(index)}
+                    accessibilityLabel={t('delete')}
+                  >
+                    <Ionicons name="close-circle" size={24} color={colors.semantic.error} />
                   </TouchableOpacity>
                 </View>
               ))}
               {photos.length < 4 && (
                 <View style={styles.addPhotoButtons}>
-                  <TouchableOpacity style={styles.addPhotoBtn} onPress={takePhoto}>
-                    <Ionicons name="camera" size={28} color="#2E7D32" />
-                    <Text style={styles.addPhotoText}>Camera</Text>
+                  <TouchableOpacity
+                    style={styles.addPhotoBtn}
+                    onPress={takePhoto}
+                    accessibilityLabel={t('camera')}
+                  >
+                    <Ionicons name="camera" size={28} color={colors.primary[800]} />
+                    <Text variant="caption" style={{ color: colors.primary[800], fontWeight: '600', marginTop: spacing[1] }}>
+                      {t('camera')}
+                    </Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.addPhotoBtn} onPress={pickImage}>
-                    <Ionicons name="images" size={28} color="#2E7D32" />
-                    <Text style={styles.addPhotoText}>Gallery</Text>
+                  <TouchableOpacity
+                    style={styles.addPhotoBtn}
+                    onPress={pickImage}
+                    accessibilityLabel={t('gallery')}
+                  >
+                    <Ionicons name="images" size={28} color={colors.primary[800]} />
+                    <Text variant="caption" style={{ color: colors.primary[800], fontWeight: '600', marginTop: spacing[1] }}>
+                      {t('gallery')}
+                    </Text>
                   </TouchableOpacity>
                 </View>
               )}
             </View>
 
             {photos.length >= 2 && !aiGrade && (
-              <TouchableOpacity
-                style={[styles.gradeButton, isProcessing && styles.gradeButtonDisabled]}
+              <Button
+                variant="primary"
                 onPress={runAIGrading}
+                loading={isProcessing}
                 disabled={isProcessing}
+                fullWidth
+                leftIcon={<Ionicons name="scan" size={20} color={colors.neutral[0]} />}
+                style={{ marginTop: spacing[5] }}
+                accessibilityLabel={t('run_ai_grading')}
               >
-                {isProcessing ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Ionicons name="scan" size={20} color="#fff" />
-                    <Text style={styles.gradeButtonText}>Run AI Quality Grading</Text>
-                  </>
-                )}
-              </TouchableOpacity>
+                {t('run_ai_grading')}
+              </Button>
             )}
 
             {aiGrade && (
-              <View style={[styles.gradeResult, { backgroundColor: gradeColors[aiGrade] + '15' }]}>
+              <View style={[styles.gradeResult, { backgroundColor: gradeBgMap[aiGrade] }]}>
                 <View style={styles.gradeHeader}>
                   <View>
-                    <Text style={styles.gradeLabel}>AI Quality Grade</Text>
-                    <Text style={[styles.gradeValue, { color: gradeColors[aiGrade] }]}>{aiGrade}</Text>
+                    <Text variant="caption" color="secondary">{t('ai_quality_grade')}</Text>
+                    <Text variant="heading2" style={{ color: gradeColorMap[aiGrade] }}>{aiGrade}</Text>
                   </View>
                   <View style={styles.confidenceBadge}>
-                    <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-                    <Text style={styles.confidenceText}>{aiConfidence}% confident</Text>
+                    <Ionicons name="checkmark-circle" size={16} color={colors.semantic.success} />
+                    <Text variant="caption" style={{ color: colors.semantic.success, fontWeight: '600' }}>
+                      {aiConfidence}% {t('confident')}
+                    </Text>
                   </View>
                 </View>
-                <View style={styles.suggestedPrice}>
-                  <Text style={styles.suggestedLabel}>Suggested Price</Text>
-                  <Text style={styles.suggestedValue}>KSh {suggestedPrice}/kg</Text>
+                <View style={styles.suggestedPriceRow}>
+                  <View style={styles.suggestedPriceInfo}>
+                    <Text variant="caption" color="secondary">{t('suggested_price')}</Text>
+                    <Text variant="heading3" style={{ color: colors.primary[900] }}>KSh {suggestedPrice}/kg</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.usePriceBtn}
+                    onPress={() => setPricePerKg(suggestedPrice.toString())}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="checkmark-circle" size={16} color={colors.background.primary} />
+                    <Text style={styles.usePriceBtnText}>{t('use_price')}</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity style={styles.retryGrade} onPress={runAIGrading}>
-                  <Ionicons name="refresh" size={16} color="#666" />
-                  <Text style={styles.retryText}>Re-analyze</Text>
+                {pricePerKg && parseInt(pricePerKg) !== suggestedPrice && (
+                  <Text variant="caption" style={{ color: colors.semantic.warning, marginTop: spacing[2] }}>
+                    {t('your_price')}: KSh {pricePerKg}/kg
+                  </Text>
+                )}
+                <TouchableOpacity
+                  style={styles.retryGrade}
+                  onPress={runAIGrading}
+                  accessibilityLabel={t('re_analyze')}
+                >
+                  <Ionicons name="refresh" size={16} color={colors.neutral[600]} />
+                  <Text variant="caption" color="secondary">{t('re_analyze')}</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -388,51 +474,101 @@ export default function SellScreen() {
         {/* Step 3: Harvest Details */}
         {step === 3 && (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Harvest Details</Text>
-            <Text style={styles.stepSubtitle}>When was this produce harvested?</Text>
+            <Text variant="heading2" style={{ color: colors.primary[900], marginBottom: spacing[2] }}>
+              {t('harvest_details')}
+            </Text>
+            <Text variant="bodySmall" color="secondary" style={{ marginBottom: spacing[6] }}>
+              {t('harvest_date')}
+            </Text>
 
-            <Text style={styles.label}>Harvest Date</Text>
-            <TextInput
-              style={styles.input}
-              value={harvestDate}
-              onChangeText={setHarvestDate}
-              placeholder="e.g. 2024-01-20"
-              placeholderTextColor="#9E9E9E"
-            />
+            <Text variant="label" style={{ marginBottom: spacing[2] }}>{t('harvest_date')}</Text>
+            <View style={styles.optionRow}>
+              {[0, 1, 2, 3].map((daysAgo) => {
+                const d = new Date();
+                d.setDate(d.getDate() - daysAgo);
+                const val = d.toISOString().split('T')[0];
+                const label = daysAgo === 0 ? 'Today' : daysAgo === 1 ? 'Yesterday' : `${daysAgo}d ago`;
+                return (
+                  <TouchableOpacity
+                    key={daysAgo}
+                    style={[styles.optionBtn, harvestDate === val && styles.optionBtnSelected]}
+                    onPress={() => setHarvestDate(val)}
+                    accessibilityLabel={`${t('harvest_date')} ${label}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: harvestDate === val }}
+                  >
+                    <Text
+                      variant="bodySmall"
+                      style={{
+                        color: harvestDate === val ? colors.primary[800] : colors.neutral[600],
+                        fontWeight: harvestDate === val ? '600' : '400',
+                      }}
+                    >
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text variant="caption" color="secondary" style={{ marginTop: spacing[1] }}>
+              {harvestDate}
+            </Text>
 
-            <Text style={styles.label}>Available for (days)</Text>
+            <Text variant="label" style={{ marginBottom: spacing[2], marginTop: spacing[4] }}>
+              {t('available_for')}
+            </Text>
             <View style={styles.optionRow}>
               {['3', '5', '7', '14'].map((days) => (
                 <TouchableOpacity
                   key={days}
                   style={[styles.optionBtn, availableDays === days && styles.optionBtnSelected]}
                   onPress={() => setAvailableDays(days)}
+                  accessibilityLabel={`${days} days`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: availableDays === days }}
                 >
-                  <Text style={[styles.optionBtnText, availableDays === days && styles.optionBtnTextSelected]}>
+                  <Text
+                    variant="bodySmall"
+                    style={{
+                      color: availableDays === days ? colors.primary[800] : colors.neutral[600],
+                      fontWeight: availableDays === days ? '600' : '400',
+                    }}
+                  >
                     {days} days
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            <Text style={styles.label}>Storage Conditions</Text>
+            <Text variant="label" style={{ marginBottom: spacing[2], marginTop: spacing[4] }}>
+              {t('storage_conditions')}
+            </Text>
             <View style={styles.storageOptions}>
               {[
-                { id: 'cool_dry', label: 'Cool & Dry', icon: 'snow' },
-                { id: 'refrigerated', label: 'Refrigerated', icon: 'thermometer' },
-                { id: 'room_temp', label: 'Room Temp', icon: 'sunny' },
+                { id: 'cool_dry', label: t('cool_dry'), icon: 'snow' },
+                { id: 'refrigerated', label: t('refrigerated'), icon: 'thermometer' },
+                { id: 'room_temp', label: t('room_temp'), icon: 'sunny' },
               ].map((option) => (
                 <TouchableOpacity
                   key={option.id}
                   style={[styles.storageOption, storageCondition === option.id && styles.storageOptionSelected]}
                   onPress={() => setStorageCondition(option.id)}
+                  accessibilityLabel={option.label}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: storageCondition === option.id }}
                 >
                   <Ionicons
                     name={option.icon as any}
                     size={20}
-                    color={storageCondition === option.id ? '#2E7D32' : '#666'}
+                    color={storageCondition === option.id ? colors.primary[800] : colors.neutral[600]}
                   />
-                  <Text style={[styles.storageText, storageCondition === option.id && styles.storageTextSelected]}>
+                  <Text
+                    variant="body"
+                    style={{
+                      color: storageCondition === option.id ? colors.primary[800] : colors.neutral[600],
+                      fontWeight: storageCondition === option.id ? '600' : '400',
+                    }}
+                  >
                     {option.label}
                   </Text>
                 </TouchableOpacity>
@@ -441,86 +577,91 @@ export default function SellScreen() {
           </View>
         )}
 
-        {/* Step 4: Delivery Options */}
+        {/* Step 4: Pickup & Review */}
         {step === 4 && (
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Delivery Options</Text>
-            <Text style={styles.stepSubtitle}>Where can buyers pick up or receive delivery?</Text>
+            <Text variant="heading2" style={{ color: colors.primary[900], marginBottom: spacing[2] }}>
+              {t('pickup_and_review')}
+            </Text>
+            <Text variant="bodySmall" color="secondary" style={{ marginBottom: spacing[6] }}>
+              {t('set_pickup_location')}
+            </Text>
 
-            <Text style={styles.label}>Pickup Location</Text>
-            <TextInput
-              style={styles.input}
+            <TouchableOpacity
+              style={styles.gpsButton}
+              onPress={useCurrentLocation}
+              disabled={gettingLocation}
+              activeOpacity={0.7}
+              accessibilityLabel={t('use_current_location')}
+            >
+              <Ionicons
+                name={gettingLocation ? 'hourglass' : 'navigate'}
+                size={20}
+                color={colors.primary[800]}
+              />
+              <Text variant="bodySmall" style={{ color: colors.primary[800], fontWeight: '600' }}>
+                {gettingLocation ? t('getting_location') : t('use_current_location')}
+              </Text>
+            </TouchableOpacity>
+
+            <Input
+              label={t('pickup_location')}
               value={pickupLocation}
-              onChangeText={setPickupLocation}
+              onChangeText={(text) => {
+                setPickupLocation(text);
+                // Clear GPS coords if user manually edits
+                setPickupLatitude(null);
+                setPickupLongitude(null);
+              }}
               placeholder="e.g. Kiambu, Limuru"
-              placeholderTextColor="#9E9E9E"
             />
 
-            <Text style={styles.label}>Delivery Available?</Text>
-            <View style={styles.toggleRow}>
-              <TouchableOpacity
-                style={[styles.toggleBtn, deliveryAvailable && styles.toggleBtnSelected]}
-                onPress={() => setDeliveryAvailable(true)}
-              >
-                <Ionicons name="checkmark" size={18} color={deliveryAvailable ? '#fff' : '#666'} />
-                <Text style={[styles.toggleText, deliveryAvailable && styles.toggleTextSelected]}>Yes</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.toggleBtn, !deliveryAvailable && styles.toggleBtnSelected]}
-                onPress={() => setDeliveryAvailable(false)}
-              >
-                <Ionicons name="close" size={18} color={!deliveryAvailable ? '#fff' : '#666'} />
-                <Text style={[styles.toggleText, !deliveryAvailable && styles.toggleTextSelected]}>No</Text>
-              </TouchableOpacity>
+            {/* Transporter info */}
+            <View style={styles.transporterInfo}>
+              <View style={styles.transporterIconWrap}>
+                <Ionicons name="car" size={20} color={colors.primary[800]} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text variant="bodySmall" style={{ fontWeight: '600', color: colors.primary[900] }}>
+                  {t('delivery_by_transporters')}
+                </Text>
+                <Text variant="caption" color="secondary" style={{ marginTop: 2 }}>
+                  {t('transporter_info')}
+                </Text>
+              </View>
             </View>
-
-            {deliveryAvailable && (
-              <>
-                <Text style={styles.label}>Delivery Radius (km)</Text>
-                <View style={styles.optionRow}>
-                  {['25', '50', '100', '200'].map((km) => (
-                    <TouchableOpacity
-                      key={km}
-                      style={[styles.optionBtn, deliveryRadius === km && styles.optionBtnSelected]}
-                      onPress={() => setDeliveryRadius(km)}
-                    >
-                      <Text style={[styles.optionBtnText, deliveryRadius === km && styles.optionBtnTextSelected]}>
-                        {km} km
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            )}
 
             {/* Summary Card */}
             <View style={styles.summaryCard}>
-              <Text style={styles.summaryTitle}>Listing Summary</Text>
+              <Text variant="heading4" style={{ marginBottom: spacing[4] }}>{t('listing_summary')}</Text>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Crop</Text>
-                <Text style={styles.summaryValue}>{CROP_TYPES.find(c => c.id === cropType)?.name}</Text>
+                <Text variant="bodySmall" color="secondary">{t('crop_type')}</Text>
+                <Text variant="bodySmall" style={{ fontWeight: '600' }}>
+                  {CROP_TYPES.find(c => c.id === cropType)?.name}
+                </Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Quantity</Text>
-                <Text style={styles.summaryValue}>{quantity} kg</Text>
+                <Text variant="bodySmall" color="secondary">{t('quantity')}</Text>
+                <Text variant="bodySmall" style={{ fontWeight: '600' }}>{quantity} kg</Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Price</Text>
-                <Text style={styles.summaryValue}>KSh {pricePerKg}/kg</Text>
+                <Text variant="bodySmall" color="secondary">{t('price')}</Text>
+                <Text variant="bodySmall" style={{ fontWeight: '600' }}>KSh {pricePerKg}/kg</Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Grade</Text>
-                <Text style={[styles.summaryValue, { color: gradeColors[aiGrade || 'Grade A'] }]}>{aiGrade}</Text>
+                <Text variant="bodySmall" color="secondary">{t('grade')}</Text>
+                <Text variant="bodySmall" style={{ fontWeight: '600', color: gradeColorMap[aiGrade || 'Grade A'] }}>
+                  {aiGrade}
+                </Text>
               </View>
               <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Total Value</Text>
-                <Text style={styles.summaryValueLarge}>
+                <Text variant="bodySmall" color="secondary">{t('total_value')}</Text>
+                <Text variant="heading4" style={{ color: colors.primary[900] }}>
                   KSh {(parseInt(quantity || '0') * parseInt(pricePerKg || '0')).toLocaleString()}
                 </Text>
               </View>
             </View>
 
-            {/* AI Success Estimate */}
             {cropType && aiGrade && pricePerKg && quantity && (
               <SuccessEstimate
                 crop={cropType}
@@ -537,129 +678,89 @@ export default function SellScreen() {
       {/* Navigation Buttons */}
       <View style={styles.navigation}>
         {step > 1 && (
-          <TouchableOpacity style={styles.backBtn} onPress={prevStep}>
-            <Ionicons name="arrow-back" size={20} color="#666" />
-            <Text style={styles.backBtnText}>Back</Text>
-          </TouchableOpacity>
+          <Button
+            variant="ghost"
+            onPress={prevStep}
+            leftIcon={<Ionicons name="arrow-back" size={20} color={colors.neutral[600]} />}
+            accessibilityLabel={t('back')}
+          >
+            {t('back')}
+          </Button>
         )}
-        <TouchableOpacity
-          style={[styles.nextBtn, step === 1 && { flex: 1 }]}
+        <Button
+          variant="primary"
           onPress={step === 4 ? publishListing : nextStep}
+          loading={isProcessing}
           disabled={isProcessing}
+          fullWidth={step === 1}
+          style={{ flex: step > 1 ? 2 : undefined }}
+          accessibilityLabel={step === 4 ? t('publish_listing') : t('continue')}
         >
-          {isProcessing ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.nextBtnText}>{step === 4 ? 'Publish Listing' : 'Continue'}</Text>
-          )}
-        </TouchableOpacity>
+          {step === 4 ? t('publish_listing') : t('continue')}
+        </Button>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: colors.background.secondary,
   },
   progressContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingHorizontal: spacing[5],
+    paddingTop: spacing[4],
+    paddingBottom: spacing[2],
   },
   progressBar: {
     height: 4,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 2,
+    backgroundColor: colors.neutral[300],
+    borderRadius: radius.xs,
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#2E7D32',
-    borderRadius: 2,
+    backgroundColor: colors.primary[800],
+    borderRadius: radius.xs,
   },
   progressText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 8,
+    marginTop: spacing[2],
     textAlign: 'right',
   },
   content: {
     flex: 1,
   },
   stepContent: {
-    padding: 20,
-  },
-  stepTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1B5E20',
-    marginBottom: 8,
-  },
-  stepSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 24,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  input: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: '#333',
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
+    padding: spacing[5],
   },
   cropGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: spacing[2.5],
   },
   cropOption: {
     width: '23%',
     aspectRatio: 1,
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#E0E0E0',
+    borderColor: colors.border.light,
   },
   cropOptionSelected: {
-    borderColor: '#2E7D32',
-    backgroundColor: '#E8F5E9',
-  },
-  cropOptionText: {
-    fontSize: 10,
-    color: '#666',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  cropOptionTextSelected: {
-    color: '#2E7D32',
-    fontWeight: '600',
+    borderColor: colors.primary[800],
+    backgroundColor: colors.primary[50],
   },
   photoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: spacing[2.5],
   },
   photoContainer: {
     width: '47%',
     aspectRatio: 1,
-    borderRadius: 12,
+    borderRadius: radius.lg,
     overflow: 'hidden',
   },
   photo: {
@@ -668,255 +769,164 @@ const styles = StyleSheet.create({
   },
   removePhoto: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    top: spacing[2],
+    right: spacing[2],
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.lg,
   },
   addPhotoButtons: {
     width: '47%',
     aspectRatio: 1,
     flexDirection: 'column',
-    gap: 8,
+    gap: spacing[2],
   },
   addPhotoBtn: {
     flex: 1,
-    backgroundColor: '#E8F5E9',
-    borderRadius: 12,
+    backgroundColor: colors.primary[50],
+    borderRadius: radius.lg,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#2E7D32',
+    borderColor: colors.primary[800],
     borderStyle: 'dashed',
   },
-  addPhotoText: {
-    fontSize: 12,
-    color: '#2E7D32',
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  gradeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#2E7D32',
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginTop: 20,
-    gap: 8,
-  },
-  gradeButtonDisabled: {
-    opacity: 0.7,
-  },
-  gradeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
   gradeResult: {
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 20,
+    borderRadius: radius.xl,
+    padding: spacing[5],
+    marginTop: spacing[5],
   },
   gradeHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  gradeLabel: {
-    fontSize: 12,
-    color: '#666',
-  },
-  gradeValue: {
-    fontSize: 28,
-    fontWeight: '700',
+    marginBottom: spacing[4],
   },
   confidenceBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
+    backgroundColor: colors.neutral[0],
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    borderRadius: radius.lg,
+    gap: spacing[1],
   },
-  confidenceText: {
-    fontSize: 12,
-    color: '#4CAF50',
-    fontWeight: '600',
-  },
-  suggestedPrice: {
+  suggestedPriceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.1)',
-    paddingTop: 16,
+    borderTopColor: colors.overlay.scrim,
+    paddingTop: spacing[4],
   },
-  suggestedLabel: {
+  suggestedPriceInfo: {},
+  usePriceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary[800],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: radius.md,
+    gap: spacing[1],
+  },
+  usePriceBtnText: {
+    color: colors.background.primary,
     fontSize: 12,
-    color: '#666',
-  },
-  suggestedValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1B5E20',
+    fontWeight: '600',
   },
   retryGrade: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
-    gap: 4,
-  },
-  retryText: {
-    fontSize: 12,
-    color: '#666',
+    marginTop: spacing[3],
+    gap: spacing[1],
   },
   optionRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: spacing[2.5],
   },
   optionBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#fff',
+    paddingVertical: spacing[3],
+    borderRadius: radius.md,
+    backgroundColor: colors.neutral[0],
     borderWidth: 1,
-    borderColor: '#E0E0E0',
+    borderColor: colors.border.light,
     alignItems: 'center',
   },
   optionBtnSelected: {
-    backgroundColor: '#E8F5E9',
-    borderColor: '#2E7D32',
-  },
-  optionBtnText: {
-    fontSize: 14,
-    color: '#666',
-  },
-  optionBtnTextSelected: {
-    color: '#2E7D32',
-    fontWeight: '600',
+    backgroundColor: colors.primary[50],
+    borderColor: colors.primary[800],
   },
   storageOptions: {
-    gap: 10,
+    gap: spacing[2.5],
   },
   storageOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: colors.neutral[0],
+    padding: spacing[4],
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    gap: 12,
+    borderColor: colors.border.light,
+    gap: spacing[3],
   },
   storageOptionSelected: {
-    backgroundColor: '#E8F5E9',
-    borderColor: '#2E7D32',
+    backgroundColor: colors.primary[50],
+    borderColor: colors.primary[800],
   },
-  storageText: {
-    fontSize: 15,
-    color: '#666',
-  },
-  storageTextSelected: {
-    color: '#2E7D32',
-    fontWeight: '600',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  toggleBtn: {
-    flex: 1,
+  transporterInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.primary[50],
+    borderRadius: radius.lg,
+    padding: spacing[4],
+    marginTop: spacing[4],
+    gap: spacing[3],
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    gap: 8,
+    borderColor: colors.primary[100],
   },
-  toggleBtnSelected: {
-    backgroundColor: '#2E7D32',
-    borderColor: '#2E7D32',
-  },
-  toggleText: {
-    fontSize: 15,
-    color: '#666',
-    fontWeight: '600',
-  },
-  toggleTextSelected: {
-    color: '#fff',
+  transporterIconWrap: {
+    width: spacing[10],
+    height: spacing[10],
+    borderRadius: spacing[5],
+    backgroundColor: colors.primary[100],
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   summaryCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 24,
+    backgroundColor: colors.neutral[0],
+    borderRadius: radius.xl,
+    padding: spacing[5],
+    marginTop: spacing[6],
     borderWidth: 1,
-    borderColor: '#E8F5E9',
-  },
-  summaryTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 16,
+    borderColor: colors.primary[50],
+    ...shadows.sm,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: spacing[2],
     borderBottomWidth: 1,
-    borderBottomColor: '#F5F5F5',
+    borderBottomColor: colors.neutral[100],
   },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  summaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-  },
-  summaryValueLarge: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1B5E20',
+  gpsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    backgroundColor: colors.primary[50],
+    borderRadius: radius.lg,
+    padding: spacing[3.5],
+    marginBottom: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.primary[200],
   },
   navigation: {
     flexDirection: 'row',
-    padding: 20,
-    gap: 12,
-    backgroundColor: '#fff',
+    padding: spacing[5],
+    gap: spacing[3],
+    backgroundColor: colors.neutral[0],
     borderTopWidth: 1,
-    borderTopColor: '#E8F5E9',
-  },
-  backBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5F5F5',
-    gap: 8,
-  },
-  backBtnText: {
-    fontSize: 15,
-    color: '#666',
-    fontWeight: '600',
-  },
-  nextBtn: {
-    flex: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    backgroundColor: '#2E7D32',
-  },
-  nextBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+    borderTopColor: colors.primary[50],
+    ...shadows.sm,
   },
 });
