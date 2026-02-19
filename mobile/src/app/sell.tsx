@@ -21,7 +21,7 @@ import { Button } from '../components/primitives/Button';
 import { Input } from '../components/primitives/Input';
 import AIPriceSuggestion from '../components/AIPriceSuggestion';
 import SuccessEstimate from '../components/SuccessEstimate';
-import { getPricePrediction, createListing } from '../services/api';
+import { getPricePrediction, createListing, gradeImage } from '../services/api';
 import { colors, spacing, radius, shadows } from '@/theme';
 
 const CROP_TYPES = [
@@ -120,39 +120,41 @@ export default function SellScreen() {
     }
 
     setIsProcessing(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    const grades = ['Premium', 'Grade A', 'Grade B'];
-    const randomGrade = grades[Math.floor(Math.random() * grades.length)];
-    const confidence = 85 + Math.floor(Math.random() * 12);
-
-    setAiGrade(randomGrade);
-    setAiConfidence(confidence);
 
     try {
-      const gradeMap: Record<string, string> = {
-        'Premium': 'PREMIUM',
-        'Grade A': 'GRADE_A',
-        'Grade B': 'GRADE_B',
-        'Grade C': 'GRADE_C',
-      };
-      const prediction = await getPricePrediction({
-        crop: cropType,
-        grade: gradeMap[randomGrade],
-        quantity: parseInt(quantity) || 100,
-        county: user?.location || 'Nairobi',
-      });
-      setSuggestedPrice(prediction.recommendedPrice);
-      if (!pricePerKg) setPricePerKg(prediction.recommendedPrice.toString());
+      // Call the real backend grading endpoint with the first photo
+      const result = await gradeImage(photos[0], cropType);
+
+      setAiGrade(result.grade);
+      setAiConfidence(result.confidence);
+      setSuggestedPrice(result.suggestedPrice);
+      if (!pricePerKg) setPricePerKg(result.suggestedPrice.toString());
     } catch (err) {
-      const basePrices: Record<string, number> = {
-        tomato: 100, potato: 80, onion: 90, cabbage: 60,
-        carrot: 85, kale: 50, spinach: 55, mango: 150,
-      };
-      const gradeMultiplier: Record<string, number> = { Premium: 1.3, 'Grade A': 1.0, 'Grade B': 0.75, 'Grade C': 0.5 };
-      const basePrice = basePrices[cropType] || 80;
-      const suggested = Math.round(basePrice * (gradeMultiplier[randomGrade] || 1));
-      setSuggestedPrice(suggested);
-      if (!pricePerKg) setPricePerKg(suggested.toString());
+      // Fallback: call price prediction with a default grade
+      console.warn('[Grading] Backend grading failed, using price prediction fallback:', err);
+      try {
+        const prediction = await getPricePrediction({
+          crop: cropType,
+          grade: 'GRADE_A',
+          quantity: parseInt(quantity) || 100,
+          county: user?.location || 'Nairobi',
+        });
+        setAiGrade('Grade A');
+        setAiConfidence(75);
+        setSuggestedPrice(prediction.recommendedPrice);
+        if (!pricePerKg) setPricePerKg(prediction.recommendedPrice.toString());
+      } catch {
+        // Last resort: static fallback
+        const basePrices: Record<string, number> = {
+          tomato: 100, potato: 80, onion: 90, cabbage: 60,
+          carrot: 85, kale: 50, spinach: 55, mango: 150,
+        };
+        const suggested = basePrices[cropType] || 80;
+        setAiGrade('Grade A');
+        setAiConfidence(70);
+        setSuggestedPrice(suggested);
+        if (!pricePerKg) setPricePerKg(suggested.toString());
+      }
     }
 
     setIsProcessing(false);
