@@ -43,7 +43,8 @@
           "photosPermission": "Allow SunHarvest to access your photos for produce grading"
         }
       ],
-      "expo-router"
+      "expo-router",
+      "react-native-fast-tflite"
     ]
   }
 }
