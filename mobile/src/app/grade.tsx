@@ -15,6 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { gradeImage, createListing, GradeResult } from '../services/api';
+import { gradeWithFallback, loadGradingModel, isModelReady } from '../services/onDeviceGrading';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { Text } from '../components/primitives/Text';
@@ -133,6 +134,13 @@ export default function GradeScreen() {
     }
   }, [user]);
 
+  // Pre-load TFLite model for on-device inference
+  useEffect(() => {
+    loadGradingModel().then((loaded) => {
+      if (loaded) console.log('[Grade] On-device model ready');
+    });
+  }, []);
+
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -178,10 +186,26 @@ export default function GradeScreen() {
     setIsGrading(true);
 
     try {
-      const gradeResult = await gradeImage(image, selectedCrop);
-      setResult(gradeResult as ExtendedResult);
+      // Grading chain: 1) Backend API → 2) On-device TFLite → 3) Offline fallback
+      const gradeResult = await gradeWithFallback(image, selectedCrop, gradeImage);
+      setResult({
+        grade: gradeResult.grade as GradeResult['grade'],
+        confidence: gradeResult.confidence,
+        suggestedPrice: 0,
+        currency: 'KSh',
+        unit: 'kg',
+        cropType: selectedCrop,
+        defects: gradeResult.defects,
+        gradedAt: new Date().toISOString(),
+      } as ExtendedResult);
+
+      if (gradeResult.source === 'on-device') {
+        console.log(`[Grade] On-device inference in ${gradeResult.inferenceTimeMs}ms`);
+      } else if (gradeResult.source === 'offline') {
+        console.log('[Grade] Used offline fallback');
+      }
     } catch (error) {
-      console.log('Grading error (using offline mock):', error);
+      console.log('Grading error (using offline fallback):', error);
       setResult(offlineGrade(selectedCrop));
     }
 
