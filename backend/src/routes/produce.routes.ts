@@ -112,21 +112,25 @@ router.post('/grade', requireAuth, handleUpload, async (req: Request, res: Respo
     const cropType = req.body.cropType || 'tomato';
     const userId = (req as AuthenticatedRequest).user.userId;
 
-    // ML grading — use real model server if configured, otherwise fall back to mock
+    // ML grading priority: 1) Real ML server (trained CNN), 2) Heuristic image analysis
     const startTime = Date.now();
     let prediction;
-    let usedModel = 'mock-v1.0';
+    let usedModel = 'heuristic-v1.0';
     if (isMLServerConfigured()) {
       try {
         const mlResult = await gradeProduceML(req.file.buffer, cropType);
         prediction = mlResult;
         usedModel = mlResult.modelVersion || 'ml-server';
+        console.log(`[Grading] Used ML server model: ${usedModel}`);
       } catch (mlErr) {
-        console.warn('[Grading] ML server call failed, falling back to mock:', mlErr);
+        console.warn('[Grading] ML server unavailable, using heuristic image analysis:', mlErr);
         prediction = await gradeProduce(req.file.buffer, cropType);
+        usedModel = prediction.modelVersion || 'heuristic-v1.0';
       }
     } else {
+      console.log('[Grading] ML server not configured, using heuristic image analysis');
       prediction = await gradeProduce(req.file.buffer, cropType);
+      usedModel = prediction.modelVersion || 'heuristic-v1.0';
     }
     const inferenceTime = Date.now() - startTime;
 

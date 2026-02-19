@@ -16,6 +16,9 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   databaseUrl: process.env.DATABASE_URL,
 
+  // ML Grading Server
+  mlServerUrl: process.env.ML_SERVER_URL || '',
+
   // M-Pesa (Safaricom Daraja API)
   mpesaConsumerKey: process.env.MPESA_CONSUMER_KEY || '',
   mpesaConsumerSecret: process.env.MPESA_CONSUMER_SECRET || '',
