@@ -348,7 +348,7 @@ export default function SellScreen() {
               placeholder={t('description')}
               multiline
               numberOfLines={3}
-              inputStyle={{ height: 100, textAlignVertical: 'top' }}
+              inputStyle={{ height: 100 }}
             />
 
             {cropType && quantity && parseInt(quantity) > 0 && (

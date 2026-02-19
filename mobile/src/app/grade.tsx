@@ -235,8 +235,7 @@ export default function GradeScreen() {
         grade: result.grade,
         price,
         quantity: parseFloat(quantity),
-        location,
-        imageUri: image || undefined,
+        county: location,
       });
       Alert.alert(
         t('listing_created'),
