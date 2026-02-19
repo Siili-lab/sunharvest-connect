@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { GradingPrediction } from './mockGradingModel';
+import { config } from '../config';
 
-const ML_SERVER_URL = process.env.ML_SERVER_URL; // e.g. http://localhost:5000
+const ML_SERVER_URL = config.mlServerUrl;
 
 export async function gradeProduceML(
   imageBuffer: Buffer,
