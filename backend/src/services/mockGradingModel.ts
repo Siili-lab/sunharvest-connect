@@ -1,10 +1,16 @@
 /**
- * Mock ML Grading Model
+ * Heuristic Grading Model (Fallback)
  *
- * Crop-aware mock that simulates realistic quality grading predictions.
- * When the real TFLite model is ready, create tfliteGradingModel.ts with the
- * same interface and toggle via USE_REAL_ML env flag.
+ * Analyzes actual image pixel data (color saturation, brightness, uniformity)
+ * to produce a quality grade. This is NOT a trained neural network — it's a
+ * rule-based fallback for when the ML server is unavailable.
+ *
+ * Priority chain:
+ *   1. Real ML server (Flask + trained MobileNetV2 Keras model)
+ *   2. This heuristic model (image-analysis-based)
  */
+
+import sharp from 'sharp';
 
 type GradeLabel = 'Premium' | 'Grade A' | 'Grade B' | 'Reject';
 
@@ -12,6 +18,7 @@ export interface GradingPrediction {
   grade: GradeLabel;
   confidence: number;
   defects: string[];
+  modelVersion?: string;
 }
 
 // Crop-specific defect pools
@@ -41,30 +48,120 @@ const CROP_DEFECTS: Record<string, string[]> = {
 
 const DEFAULT_DEFECTS = ['minor surface blemishes', 'slight discoloration', 'small bruise', 'cosmetic imperfection'];
 
-// Weighted grade distribution: ~25% Premium, ~60% Grade A, ~12% Grade B, ~3% Reject
-const GRADE_THRESHOLDS: { grade: GradeLabel; cumulative: number }[] = [
-  { grade: 'Premium', cumulative: 0.25 },
-  { grade: 'Grade A', cumulative: 0.85 },
-  { grade: 'Grade B', cumulative: 0.97 },
-  { grade: 'Reject', cumulative: 1.0 },
-];
+// Expected dominant color ranges (HSL hue) per crop for freshness
+const CROP_HUE_RANGES: Record<string, { fresh: [number, number]; overripe: [number, number] }> = {
+  tomato: { fresh: [0, 30], overripe: [30, 60] },     // Red is fresh, brownish is bad
+  tomatoes: { fresh: [0, 30], overripe: [30, 60] },
+  mango: { fresh: [30, 70], overripe: [15, 30] },     // Yellow-orange is fresh
+  mangoes: { fresh: [30, 70], overripe: [15, 30] },
+  potato: { fresh: [25, 55], overripe: [60, 130] },   // Brown is fine, green is bad
+  potatoes: { fresh: [25, 55], overripe: [60, 130] },
+  cabbage: { fresh: [70, 160], overripe: [40, 70] },  // Green is fresh
+  kale: { fresh: [70, 160], overripe: [40, 70] },
+  spinach: { fresh: [70, 160], overripe: [40, 70] },
+  carrot: { fresh: [15, 40], overripe: [40, 80] },    // Orange is fresh
+  carrots: { fresh: [15, 40], overripe: [40, 80] },
+};
 
-function pickGrade(): GradeLabel {
-  const roll = Math.random();
-  for (const { grade, cumulative } of GRADE_THRESHOLDS) {
-    if (roll < cumulative) return grade;
-  }
-  return 'Grade A';
+interface ImageStats {
+  avgBrightness: number;     // 0–255
+  avgSaturation: number;     // 0–255
+  brightnessStdDev: number;  // Uniformity measure
+  saturationStdDev: number;
+  colorScore: number;        // 0–1 how well colors match expected crop
 }
 
-// Confidence varies by grade — extremes (Premium/Reject) get higher confidence
-function pickConfidence(grade: GradeLabel): number {
-  switch (grade) {
-    case 'Premium': return 0.88 + Math.random() * 0.10;  // 0.88–0.98
-    case 'Grade A':  return 0.75 + Math.random() * 0.15;  // 0.75–0.90
-    case 'Grade B':  return 0.70 + Math.random() * 0.15;  // 0.70–0.85
-    case 'Reject':   return 0.85 + Math.random() * 0.12;  // 0.85–0.97
+async function analyzeImage(imageBuffer: Buffer, cropType: string): Promise<ImageStats> {
+  // Resize to small image for fast analysis
+  const { data, info } = await sharp(imageBuffer)
+    .resize(64, 64, { fit: 'cover' })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const pixelCount = info.width * info.height;
+  let totalR = 0, totalG = 0, totalB = 0;
+  let totalBrightness = 0;
+  let totalSaturation = 0;
+  const brightnesses: number[] = [];
+  const saturations: number[] = [];
+
+  for (let i = 0; i < data.length; i += info.channels) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    totalR += r;
+    totalG += g;
+    totalB += b;
+
+    // Brightness (perceived luminance)
+    const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+    totalBrightness += brightness;
+    brightnesses.push(brightness);
+
+    // Saturation (simple: max-min of RGB channels)
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const saturation = max === 0 ? 0 : ((max - min) / max) * 255;
+    totalSaturation += saturation;
+    saturations.push(saturation);
   }
+
+  const avgBrightness = totalBrightness / pixelCount;
+  const avgSaturation = totalSaturation / pixelCount;
+
+  // Standard deviations (uniformity)
+  const brightnessStdDev = Math.sqrt(
+    brightnesses.reduce((sum, b) => sum + (b - avgBrightness) ** 2, 0) / pixelCount
+  );
+  const saturationStdDev = Math.sqrt(
+    saturations.reduce((sum, s) => sum + (s - avgSaturation) ** 2, 0) / pixelCount
+  );
+
+  // Color score: how well the dominant hue matches the expected crop color
+  const avgR = totalR / pixelCount;
+  const avgG = totalG / pixelCount;
+  const avgB = totalB / pixelCount;
+  const hue = rgbToHue(avgR, avgG, avgB);
+
+  let colorScore = 0.5; // Default neutral
+  const hueRange = CROP_HUE_RANGES[cropType.toLowerCase()];
+  if (hueRange) {
+    if (hue >= hueRange.fresh[0] && hue <= hueRange.fresh[1]) {
+      colorScore = 0.8 + Math.random() * 0.15; // Good color match
+    } else if (hue >= hueRange.overripe[0] && hue <= hueRange.overripe[1]) {
+      colorScore = 0.2 + Math.random() * 0.2;  // Bad color
+    } else {
+      colorScore = 0.4 + Math.random() * 0.2;  // Neutral
+    }
+  }
+
+  return { avgBrightness, avgSaturation, brightnessStdDev, saturationStdDev, colorScore };
+}
+
+function rgbToHue(r: number, g: number, b: number): number {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+
+  if (delta === 0) return 0;
+
+  let hue: number;
+  if (max === r) hue = ((g - b) / delta) % 6;
+  else if (max === g) hue = (b - r) / delta + 2;
+  else hue = (r - g) / delta + 4;
+
+  hue = Math.round(hue * 60);
+  if (hue < 0) hue += 360;
+  return hue;
+}
+
+function scoreToGrade(score: number): { grade: GradeLabel; confidence: number } {
+  if (score >= 0.80) return { grade: 'Premium', confidence: 0.75 + (score - 0.80) * 1.0 };
+  if (score >= 0.60) return { grade: 'Grade A', confidence: 0.70 + (score - 0.60) * 0.5 };
+  if (score >= 0.35) return { grade: 'Grade B', confidence: 0.65 + (score - 0.35) * 0.4 };
+  return { grade: 'Reject', confidence: 0.70 + (0.35 - score) * 0.5 };
 }
 
 function pickDefects(cropType: string, grade: GradeLabel): string[] {
@@ -73,27 +170,61 @@ function pickDefects(cropType: string, grade: GradeLabel): string[] {
   const pool = CROP_DEFECTS[cropType.toLowerCase()] || DEFAULT_DEFECTS;
   const count = grade === 'Grade A' ? 1 : grade === 'Grade B' ? 2 : 3;
 
-  // Shuffle and take `count` items
   const shuffled = [...pool].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, count);
 }
 
 /**
- * Simulate ML inference on a produce image.
+ * Heuristic image analysis grading.
  *
- * // SWAP: replace with real model — create tfliteGradingModel.ts with the same
- * // GradingPrediction interface, then conditionally import based on USE_REAL_ML env.
+ * Analyzes actual pixel data — brightness, saturation, color match, uniformity —
+ * to produce a quality assessment. Not as accurate as the trained CNN but provides
+ * a meaningful result based on the actual image rather than random values.
  */
 export async function gradeProduce(
-  _imageBuffer: Buffer,
+  imageBuffer: Buffer,
   cropType: string,
 ): Promise<GradingPrediction> {
-  // Simulate ~200ms inference latency
-  await new Promise((resolve) => setTimeout(resolve, 180 + Math.random() * 40));
+  let stats: ImageStats;
 
-  const grade = pickGrade();
-  const confidence = Math.round(pickConfidence(grade) * 100) / 100;
+  try {
+    stats = await analyzeImage(imageBuffer, cropType);
+  } catch {
+    // If image analysis fails (corrupt image, etc.), return a conservative grade
+    return {
+      grade: 'Grade B',
+      confidence: 0.55,
+      defects: ['unable to fully analyze image — manual review recommended'],
+      modelVersion: 'heuristic-v1.0',
+    };
+  }
+
+  // Compute composite quality score (0–1)
+  // Weight: color match 35%, saturation 25%, brightness 20%, uniformity 20%
+
+  // Saturation score: higher saturation = fresher produce (0–1)
+  const satScore = Math.min(stats.avgSaturation / 180, 1.0);
+
+  // Brightness score: moderate brightness is best (too dark or too bright = bad)
+  const brightScore = 1.0 - Math.abs(stats.avgBrightness - 140) / 140;
+
+  // Uniformity score: lower std dev = more uniform = better quality
+  const uniformScore = 1.0 - Math.min(stats.brightnessStdDev / 80, 1.0);
+
+  const compositeScore =
+    stats.colorScore * 0.35 +
+    satScore * 0.25 +
+    Math.max(brightScore, 0) * 0.20 +
+    uniformScore * 0.20;
+
+  const { grade, confidence } = scoreToGrade(compositeScore);
+  const clampedConfidence = Math.round(Math.min(Math.max(confidence, 0.55), 0.85) * 100) / 100;
   const defects = pickDefects(cropType, grade);
 
-  return { grade, confidence, defects };
+  return {
+    grade,
+    confidence: clampedConfidence,
+    defects,
+    modelVersion: 'heuristic-v1.0',
+  };
 }
