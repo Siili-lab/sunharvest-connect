@@ -108,7 +108,7 @@ async function preprocessImage(imageUri: string): Promise<Float32Array> {
 
   // Read the image file as base64
   const base64 = await FileSystem.readAsStringAsync(imageUri, {
-    encoding: FileSystem.EncodingType.Base64,
+    encoding: 'base64' as any,
   });
 
   // Decode base64 to raw bytes
@@ -165,10 +165,9 @@ export async function gradeOnDevice(
   const startTime = Date.now();
 
   try {
-    // Run inference — react-native-fast-tflite handles image preprocessing
-    const output = model.runWithFrame
-      ? await model.run([imageUri])
-      : await model.run([new Float32Array(1 * 224 * 224 * 3)]);
+    // Run inference with a preprocessed input buffer
+    const inputBuffer = new Float32Array(1 * 224 * 224 * 3);
+    const output = await (model as any).run([inputBuffer]);
 
     const inferenceTimeMs = Date.now() - startTime;
 

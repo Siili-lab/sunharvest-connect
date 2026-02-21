@@ -340,6 +340,8 @@ export const translations = {
     missing_info: 'Missing Info',
     camera_roll_required: 'Camera roll access is required',
     camera_required: 'Camera access is required',
+    view_market: 'View Market',
+    missing_info_message: 'Please fill in quantity and location',
 
     // SACCO
     total_savings: 'Total Savings',
@@ -428,7 +430,6 @@ export const translations = {
     loading_orders: 'Loading orders...',
     order_placed: 'Order Placed',
     awaiting_payment: 'Awaiting Payment',
-    rate_transaction: 'Rate Transaction',
 
     // Market extra
     ai_fair_price: 'AI Fair Price',
@@ -458,31 +459,6 @@ export const translations = {
     step_harvest: 'Harvest',
     step_delivery: 'Delivery',
     step_review: 'Review',
-
-    // Grade screen
-    instant_grading_subtitle: 'Get instant quality grading and price suggestion',
-    open_camera: 'Open Camera',
-    choose_gallery: 'Choose from Gallery',
-    what_grading: 'What are you grading?',
-    analyze_quality: 'Analyze Quality',
-    list_for_sale: 'List for Sale',
-    grade_another: 'Grade Another',
-    retake_photo: 'Retake Photo',
-    list_your_produce: 'List Your Produce',
-    quality_grade: 'Quality Grade',
-    your_price_optional: 'Your Price (optional)',
-    creating: 'Creating...',
-    select_crop_type: 'Select Crop Type',
-    listing_created: 'Listing Created!',
-    permission_needed: 'Permission Needed',
-    missing_info: 'Missing Info',
-    camera_roll_required: 'Camera roll access is required',
-    camera_required: 'Camera access is required',
-    price_range: 'Price Range',
-    market_trend: 'Market Trend',
-    notes: 'Notes',
-    view_market: 'View Market',
-    missing_info_message: 'Please fill in quantity and location',
 
     // Privacy
     privacy_intro: 'SunHarvest Connect is committed to protecting your privacy.',
@@ -887,6 +863,8 @@ export const translations = {
     missing_info: 'Taarifa Zinakosekana',
     camera_roll_required: 'Upatikanaji wa galari ya picha unahitajika',
     camera_required: 'Upatikanaji wa kamera unahitajika',
+    view_market: 'Tazama Soko',
+    missing_info_message: 'Tafadhali jaza kiasi na mahali',
 
     // SACCO
     total_savings: 'Akiba Jumla',
@@ -975,7 +953,6 @@ export const translations = {
     loading_orders: 'Inapakia oda...',
     order_placed: 'Oda Imewekwa',
     awaiting_payment: 'Inasubiri Malipo',
-    rate_transaction: 'Kadiria Muamala',
 
     // Market extra
     ai_fair_price: 'Bei ya Haki ya AI',
@@ -1005,31 +982,6 @@ export const translations = {
     step_harvest: 'Mavuno',
     step_delivery: 'Usafirishaji',
     step_review: 'Kagua',
-
-    // Grade screen
-    instant_grading_subtitle: 'Pata upimaji wa ubora na bei papo hapo',
-    open_camera: 'Fungua Kamera',
-    choose_gallery: 'Chagua kutoka Galari',
-    what_grading: 'Unapima nini?',
-    analyze_quality: 'Chambua Ubora',
-    list_for_sale: 'Orodhesha Kuuza',
-    grade_another: 'Pima Kingine',
-    retake_photo: 'Piga Picha Tena',
-    list_your_produce: 'Orodhesha Mazao Yako',
-    quality_grade: 'Daraja la Ubora',
-    your_price_optional: 'Bei Yako (si lazima)',
-    creating: 'Inatengeneza...',
-    select_crop_type: 'Chagua Aina ya Zao',
-    listing_created: 'Orodha Imetengenezwa!',
-    permission_needed: 'Ruhusa Inahitajika',
-    missing_info: 'Taarifa Zinakosekana',
-    camera_roll_required: 'Ruhusa ya galari inahitajika',
-    camera_required: 'Ruhusa ya kamera inahitajika',
-    price_range: 'Kiwango cha Bei',
-    market_trend: 'Mwenendo wa Soko',
-    notes: 'Maelezo',
-    view_market: 'Tazama Soko',
-    missing_info_message: 'Tafadhali jaza kiasi na mahali',
 
     // Privacy
     privacy_intro: 'SunHarvest Connect imejitolea kulinda faragha yako.',
