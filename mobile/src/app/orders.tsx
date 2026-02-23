@@ -89,7 +89,7 @@ const offerToOrder = (offer: Offer, isFarmer: boolean): Order => {
     location: offer.location || 'Kenya',
     createdAt: createdAtStr,
     escrowStatus,
-    grade: 'Grade A', // Default grade
+    grade: offer.grade || 'Grade A',
     images: offer.images,
   };
 };
@@ -631,7 +631,18 @@ export default function OrdersScreen() {
                   {selectedOrder.status === 'in_transit' && (
                     <Button
                       variant="primary"
-                      onPress={() => {}}
+                      onPress={() => {
+                        const phone = isFarmer ? selectedOrder.buyerPhone : selectedOrder.farmerPhone;
+                        const name = isFarmer ? selectedOrder.buyerName : selectedOrder.farmerName;
+                        Alert.alert(
+                          'Delivery In Transit',
+                          `Your order of ${selectedOrder.quantity}kg ${selectedOrder.crop} is on the way.\n\nContact ${name || 'the other party'} for delivery updates.`,
+                          [
+                            { text: 'OK' },
+                            ...(phone ? [{ text: `Call ${name}`, onPress: () => Linking.openURL(`tel:${phone}`) }] : []),
+                          ]
+                        );
+                      }}
                       leftIcon={<Ionicons name="location" size={20} color={colors.neutral[0]} />}
                       accessibilityLabel={t('in_transit')}
                       fullWidth
