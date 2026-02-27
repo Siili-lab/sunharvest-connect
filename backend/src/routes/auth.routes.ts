@@ -6,6 +6,47 @@ import { hashPin, verifyPin, generateToken } from '../middleware/auth';
 const router = Router();
 const prisma = new PrismaClient();
 
+// Account lockout: track failed login attempts per phone number
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+const loginAttempts = new Map<string, { count: number; lockedUntil: number | null }>();
+
+function checkAccountLock(phone: string): { locked: boolean; minutesRemaining?: number } {
+  const entry = loginAttempts.get(phone);
+  if (!entry) return { locked: false };
+
+  if (entry.lockedUntil && Date.now() < entry.lockedUntil) {
+    const minutesRemaining = Math.ceil((entry.lockedUntil - Date.now()) / 60000);
+    return { locked: true, minutesRemaining };
+  }
+
+  // Lockout expired — reset
+  if (entry.lockedUntil && Date.now() >= entry.lockedUntil) {
+    loginAttempts.delete(phone);
+    return { locked: false };
+  }
+
+  return { locked: false };
+}
+
+function recordFailedAttempt(phone: string): { locked: boolean; attemptsRemaining: number } {
+  const entry = loginAttempts.get(phone) || { count: 0, lockedUntil: null };
+  entry.count += 1;
+
+  if (entry.count >= MAX_LOGIN_ATTEMPTS) {
+    entry.lockedUntil = Date.now() + LOCKOUT_DURATION_MS;
+    loginAttempts.set(phone, entry);
+    return { locked: true, attemptsRemaining: 0 };
+  }
+
+  loginAttempts.set(phone, entry);
+  return { locked: false, attemptsRemaining: MAX_LOGIN_ATTEMPTS - entry.count };
+}
+
+function clearFailedAttempts(phone: string): void {
+  loginAttempts.delete(phone);
+}
+
 const registerSchema = z.object({
   phone: z.string().min(10).max(15),
   name: z.string().min(2).max(100),
@@ -102,12 +143,27 @@ router.post('/login', async (req: Request, res: Response) => {
   try {
     const data = loginSchema.parse(req.body);
 
+    // Check account lockout BEFORE any database queries
+    const lockStatus = checkAccountLock(data.phone);
+    if (lockStatus.locked) {
+      res.status(423).json({
+        success: false,
+        error: {
+          code: 'ACCOUNT_LOCKED',
+          message: `Account temporarily locked due to too many failed attempts. Try again in ${lockStatus.minutesRemaining} minutes.`,
+        },
+      });
+      return;
+    }
+
     // Find user
     const user = await prisma.user.findUnique({
       where: { phone: data.phone },
     });
 
     if (!user) {
+      // Record failed attempt even for non-existent users (prevent enumeration)
+      recordFailedAttempt(data.phone);
       res.status(401).json({
         success: false,
         error: { code: 'AUTH_FAILED', message: 'Invalid phone or PIN' },
@@ -118,12 +174,19 @@ router.post('/login', async (req: Request, res: Response) => {
     // Verify PIN
     const valid = await verifyPin(data.pin, user.pin);
     if (!valid) {
-      res.status(401).json({
+      const result = recordFailedAttempt(data.phone);
+      const message = result.locked
+        ? 'Account locked due to too many failed attempts. Try again in 30 minutes.'
+        : `Invalid phone or PIN. ${result.attemptsRemaining} attempts remaining.`;
+      res.status(result.locked ? 423 : 401).json({
         success: false,
-        error: { code: 'AUTH_FAILED', message: 'Invalid phone or PIN' },
+        error: { code: result.locked ? 'ACCOUNT_LOCKED' : 'AUTH_FAILED', message },
       });
       return;
     }
+
+    // Successful login — clear any failed attempts
+    clearFailedAttempts(data.phone);
 
     // Check if account is active
     if (!user.isActive) {

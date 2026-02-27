@@ -86,15 +86,57 @@ router.post('/stkpush', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// POST /mpesa/callback — Safaricom callback (NO auth)
+// Safaricom production IP ranges (for callback verification)
+const SAFARICOM_IP_RANGES = [
+  '196.201.214.',  // Safaricom Daraja
+  '196.201.213.',
+  '196.201.212.',
+];
+
+function isSafaricomIP(ip: string | undefined): boolean {
+  if (!ip) return false;
+  // In development/sandbox, allow all IPs
+  if (process.env.NODE_ENV !== 'production') return true;
+  const cleanIP = ip.replace('::ffff:', '');
+  return SAFARICOM_IP_RANGES.some(range => cleanIP.startsWith(range));
+}
+
+// Track processed callbacks for idempotency
+const processedCallbacks = new Set<string>();
+
+// POST /mpesa/callback — Safaricom callback (IP-verified, idempotent)
 router.post('/callback', async (req: Request, res: Response) => {
   try {
+    // 1. Verify request comes from Safaricom
+    const clientIP = req.ip || req.socket.remoteAddress;
+    if (!isSafaricomIP(clientIP)) {
+      console.warn(`[M-Pesa] Callback rejected — untrusted IP: ${clientIP}`);
+      return res.status(403).json({ ResultCode: 1, ResultDesc: 'Forbidden' });
+    }
+
     const { Body } = req.body;
+    if (!Body?.stkCallback) {
+      return res.status(400).json({ ResultCode: 1, ResultDesc: 'Invalid payload' });
+    }
+
     const { stkCallback } = Body;
     const { ResultCode, CheckoutRequestID, CallbackMetadata } = stkCallback;
 
+    if (!CheckoutRequestID) {
+      return res.status(400).json({ ResultCode: 1, ResultDesc: 'Missing CheckoutRequestID' });
+    }
+
+    // 2. Idempotency — reject duplicate callbacks
+    if (processedCallbacks.has(CheckoutRequestID)) {
+      return res.json({ ResultCode: 0, ResultDesc: 'Already processed' });
+    }
+
+    // 3. Verify this CheckoutRequestID belongs to a real pending transaction
     const transaction = await prisma.transaction.findFirst({
-      where: { checkoutRequestId: CheckoutRequestID },
+      where: {
+        checkoutRequestId: CheckoutRequestID,
+        status: 'PAYMENT_PENDING', // Only accept callbacks for PENDING payments
+      },
       include: {
         listing: { select: { cropType: true, farmerId: true } },
         buyer: { select: { name: true } },
@@ -102,9 +144,14 @@ router.post('/callback', async (req: Request, res: Response) => {
     });
 
     if (!transaction) {
-      // Respond OK to Safaricom even if we can't find the transaction
+      console.warn(`[M-Pesa] Callback for unknown/already-processed checkout: ${CheckoutRequestID}`);
       return res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
     }
+
+    // 4. Mark as processed before updating (idempotency)
+    processedCallbacks.add(CheckoutRequestID);
+    // Clean up old entries after 1 hour to prevent memory leak
+    setTimeout(() => processedCallbacks.delete(CheckoutRequestID), 60 * 60 * 1000);
 
     if (ResultCode === 0) {
       // Payment successful
@@ -142,6 +189,8 @@ router.post('/callback', async (req: Request, res: Response) => {
         `Your M-Pesa payment for ${transaction.listing.cropType} has been confirmed`,
         { transactionId: transaction.id, mpesaReceiptNumber }
       );
+
+      console.log(`[M-Pesa] Payment confirmed: ${mpesaReceiptNumber} for transaction ${transaction.id}`);
     } else {
       // Payment failed — revert to ACCEPTED
       await prisma.transaction.update({
@@ -160,6 +209,8 @@ router.post('/callback', async (req: Request, res: Response) => {
         `M-Pesa payment for ${transaction.listing.cropType} failed. Please try again.`,
         { transactionId: transaction.id }
       );
+
+      console.log(`[M-Pesa] Payment failed (code ${ResultCode}) for transaction ${transaction.id}`);
     }
 
     // Always respond OK to Safaricom
