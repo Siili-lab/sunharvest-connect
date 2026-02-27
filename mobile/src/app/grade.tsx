@@ -201,8 +201,6 @@ export default function GradeScreen() {
 
       if (gradeResult.source === 'on-device') {
         console.log(`[Grade] On-device inference in ${gradeResult.inferenceTimeMs}ms`);
-      } else if (gradeResult.source === 'offline') {
-        console.log('[Grade] Used offline fallback');
       }
     } catch (error) {
       console.log('Grading error (using offline fallback):', error);

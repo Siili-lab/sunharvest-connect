@@ -53,9 +53,16 @@ model User {
   rating          Float?
   totalRatings    Int     @default(0)
 
+  // KYC (Know Your Customer) — Kenya DPA 2019 compliant
+  nationalId      String?   // Encrypted national ID number
+  kycStatus       KycStatus @default(NOT_SUBMITTED)
+  kycSubmittedAt  DateTime?
+  kycVerifiedAt   DateTime?
+
   @@index([phone])
   @@index([role])
   @@index([county])
+  @@index([kycStatus])
 }
 
 enum UserRole {
@@ -68,6 +75,13 @@ enum UserRole {
 enum Language {
   EN
   SW
+}
+
+enum KycStatus {
+  NOT_SUBMITTED
+  PENDING       // Documents uploaded, awaiting review
+  VERIFIED      // Identity confirmed
+  REJECTED      // Documents invalid, user can resubmit
 }
 
 // ============================================
